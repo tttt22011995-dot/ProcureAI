@@ -5,7 +5,7 @@ import Vendors from './pages/Vendors';
 import PurchaseOrders from './pages/PurchaseOrders';
 import Delivery from './pages/Delivery';
 import Scorecard from './pages/Scorecard';
-import AiRisk from './pages/AiRisk';
+import AIRisk from './pages/AIRisk';
 import { seedData, type Page } from './lib/data';
 import { PageErrorBoundary } from './components/ErrorBoundary';
 
@@ -33,7 +33,7 @@ function App() {
       case 'purchase-orders': return <PageErrorBoundary><PurchaseOrders /></PageErrorBoundary>;
       case 'delivery': return <PageErrorBoundary><Delivery /></PageErrorBoundary>;
       case 'scorecard': return <PageErrorBoundary><Scorecard /></PageErrorBoundary>;
-      case 'ai-risk': return <PageErrorBoundary><AiRisk /></PageErrorBoundary>;
+      case 'ai-risk': return <PageErrorBoundary><AIRisk /></PageErrorBoundary>;
     }
   };
 
