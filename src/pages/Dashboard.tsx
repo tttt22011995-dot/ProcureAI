@@ -331,13 +331,13 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div>
+      <div data-tour="dashboard-header">
         <h1 className="text-2xl font-bold" style={{ color: 'var(--text)' }}>Dashboard</h1>
         <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Supply chain overview and key metrics</p>
       </div>
 
       {/* KPI Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+      <div data-tour="kpi-cards" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         <KpiCard icon={Users} label="Total Vendors" value={totalVendors} accent="blue" trend={vendorTrend} />
         <KpiCard icon={FileText} label="Open POs" value={openPOs} accent="green" trend={openPOs > 0 ? 'up' : 'stable'} />
         <KpiCard icon={AlertTriangle} label="Overdue Deliveries" value={overdueCount} accent="red" trend={overdueCount > 0 ? 'down' : 'stable'} />
@@ -345,10 +345,10 @@ export default function Dashboard() {
       </div>
 
       {/* Monthly PO Activity */}
-      <div className="glass-card-solid p-5">
+      <div data-tour="chart-panel" className="glass-card-solid p-5">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <h3 className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>Monthly PO Activity</h3>
-          <div className="flex items-center gap-2">
+          <div data-tour="chart-range" className="flex items-center gap-2">
             {(['3M', '6M', '12M'] as Range[]).map(r => (
               <button
                 key={r}
@@ -392,7 +392,7 @@ export default function Dashboard() {
       </div>
 
       {/* Recent Purchase Orders */}
-      <div className="glass-card-solid p-5">
+      <div data-tour="recent-orders" className="glass-card-solid p-5">
         <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-secondary)' }}>Recent Purchase Orders</h3>
         {recentPOs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 gap-3" style={{ color: 'var(--text-muted)' }}>
