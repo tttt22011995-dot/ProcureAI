@@ -26,6 +26,11 @@ export interface LineItem {
   total: number;
 }
 
+export interface DeliveryNote {
+  timestamp: string;
+  text: string;
+}
+
 export interface PurchaseOrder {
   id: string;
   vendorId: string;
@@ -36,6 +41,10 @@ export interface PurchaseOrder {
   createdAt: string;
   deliveryDate: string;
   priority: 'low' | 'medium' | 'high' | 'critical';
+  // Delivery tracking fields
+  deliveryStatus?: 'ordered' | 'confirmed' | 'in-transit' | 'delivered' | 'invoiced';
+  actualDeliveryDate?: string | null;
+  deliveryNotes?: DeliveryNote[];
 }
 
 export interface VendorRating {
@@ -57,6 +66,8 @@ export interface DeliveryPerformance {
   actualDate: string | null;
   status: 'on-time' | 'delayed' | 'in-transit' | 'pending';
   delayDays: number;
+  onTime?: boolean;
+  daysDifference?: number;
 }
 
 // ─── In-Memory Store (with localStorage fallback) ───
@@ -283,6 +294,9 @@ const samplePOs: PurchaseOrder[] = [
     createdAt: '2026-05-15',
     deliveryDate: '2026-06-20',
     priority: 'high',
+    deliveryStatus: 'confirmed',
+    actualDeliveryDate: null,
+    deliveryNotes: [],
   },
   {
     id: 'PO-1002',
@@ -296,6 +310,9 @@ const samplePOs: PurchaseOrder[] = [
     createdAt: '2026-05-10',
     deliveryDate: '2026-06-12',
     priority: 'medium',
+    deliveryStatus: 'in-transit',
+    actualDeliveryDate: null,
+    deliveryNotes: [],
   },
   {
     id: 'PO-1003',
@@ -309,6 +326,9 @@ const samplePOs: PurchaseOrder[] = [
     createdAt: '2026-06-01',
     deliveryDate: '2026-07-01',
     priority: 'low',
+    deliveryStatus: 'ordered',
+    actualDeliveryDate: null,
+    deliveryNotes: [],
   },
   {
     id: 'PO-1004',
@@ -323,6 +343,9 @@ const samplePOs: PurchaseOrder[] = [
     createdAt: '2026-04-20',
     deliveryDate: '2026-05-15',
     priority: 'medium',
+    deliveryStatus: 'invoiced',
+    actualDeliveryDate: '2026-05-14',
+    deliveryNotes: [],
   },
   {
     id: 'PO-1005',
@@ -337,6 +360,9 @@ const samplePOs: PurchaseOrder[] = [
     createdAt: '2026-06-08',
     deliveryDate: '2026-07-15',
     priority: 'critical',
+    deliveryStatus: 'ordered',
+    actualDeliveryDate: null,
+    deliveryNotes: [],
   },
 ];
 
@@ -349,11 +375,11 @@ const sampleRatings: VendorRating[] = [
 ];
 
 const sampleDeliveries: DeliveryPerformance[] = [
-  { id: 'd1', poId: 'PO-1001', vendorId: 'v1', vendorName: 'Apex Materials Inc.', promisedDate: '2026-06-20', actualDate: null, status: 'in-transit', delayDays: 0 },
-  { id: 'd2', poId: 'PO-1002', vendorId: 'v2', vendorName: 'NovaTech Components', promisedDate: '2026-06-12', actualDate: null, status: 'in-transit', delayDays: 0 },
-  { id: 'd3', poId: 'PO-1003', vendorId: 'v3', vendorName: 'GreenLine Logistics', promisedDate: '2026-07-01', actualDate: null, status: 'pending', delayDays: 0 },
-  { id: 'd4', poId: 'PO-1004', vendorId: 'v4', vendorName: 'Pinnacle Packaging', promisedDate: '2026-05-15', actualDate: '2026-05-14', status: 'on-time', delayDays: 0 },
-  { id: 'd5', poId: 'PO-1005', vendorId: 'v1', vendorName: 'Apex Materials Inc.', promisedDate: '2026-07-15', actualDate: null, status: 'pending', delayDays: 0 },
+  { id: 'd1', poId: 'PO-1001', vendorId: 'v1', vendorName: 'Apex Materials Inc.', promisedDate: '2026-06-20', actualDate: null, status: 'in-transit', delayDays: 0, onTime: true, daysDifference: 0 },
+  { id: 'd2', poId: 'PO-1002', vendorId: 'v2', vendorName: 'NovaTech Components', promisedDate: '2026-06-12', actualDate: null, status: 'in-transit', delayDays: 0, onTime: true, daysDifference: 0 },
+  { id: 'd3', poId: 'PO-1003', vendorId: 'v3', vendorName: 'GreenLine Logistics', promisedDate: '2026-07-01', actualDate: null, status: 'pending', delayDays: 0, onTime: true, daysDifference: 0 },
+  { id: 'd4', poId: 'PO-1004', vendorId: 'v4', vendorName: 'Pinnacle Packaging', promisedDate: '2026-05-15', actualDate: '2026-05-14', status: 'on-time', delayDays: 0, onTime: true, daysDifference: 1 },
+  { id: 'd5', poId: 'PO-1005', vendorId: 'v1', vendorName: 'Apex Materials Inc.', promisedDate: '2026-07-15', actualDate: null, status: 'pending', delayDays: 0, onTime: true, daysDifference: 0 },
 ];
 
 // ─── Business Logic ───
