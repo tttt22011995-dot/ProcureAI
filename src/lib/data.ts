@@ -420,8 +420,7 @@ export async function upsertVendorRating(rating: VendorRating): Promise<boolean>
 export async function fetchDeliveryPerformance(): Promise<DeliveryPerformance[]> {
   const { data, error } = await supabase
     .from('delivery_performance')
-    .select('*')
-    .order('created_at', { ascending: false });
+    .select('*');
   if (error) {
     console.error('fetchDeliveryPerformance error:', error);
     return [];
@@ -477,7 +476,12 @@ export async function deleteCatalogItem(id: string): Promise<boolean> {
 // ─── Seed data (called once on app mount if vendors table empty) ───
 
 export async function seedData(): Promise<void> {
-  const { data: existing } = await supabase.from('vendors').select('id').limit(1);
+  try {
+  const { data: existing, error: checkError } = await supabase.from('vendors').select('id').limit(1);
+  if (checkError) {
+    console.warn('seedData: cannot reach vendors table, skipping:', checkError.message);
+    return;
+  }
   if (existing && existing.length > 0) return;
 
   // Seed vendors
@@ -569,6 +573,9 @@ export async function seedData(): Promise<void> {
 
   for (const p of perfs) {
     await upsertDeliveryPerformance(p);
+  }
+  } catch (err) {
+    console.error('seedData failed, app loads with empty data:', err);
   }
 }
 
