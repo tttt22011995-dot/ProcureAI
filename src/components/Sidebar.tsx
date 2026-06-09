@@ -191,9 +191,9 @@ export default function Sidebar({ active, onNavigate, isDark, onToggleTheme, isM
         <div ref={portalRef} style={{
           position: 'fixed', top: dropdownPos.top, left: dropdownPos.left,
           width: 300, zIndex: 9999, borderRadius: 16,
-        }} className="glass-panel p-0 overflow-hidden">
+        }} className="glass-panel p-0">
           <div className="px-4 py-3 text-xs font-semibold uppercase tracking-wider"
-            style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--glass-border)' }}>
+            style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--glass-border)', borderRadius: '16px 16px 0 0', overflow: 'hidden' }}>
             Alerts ({alerts.length})
           </div>
           <div className="max-h-[320px] overflow-y-auto">
