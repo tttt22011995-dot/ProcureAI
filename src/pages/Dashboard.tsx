@@ -182,7 +182,8 @@ export default function Dashboard() {
   const [range, setRange] = useState<Range>('6M');
   const [chartError, setChartError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const { refreshKey } = useRefresh();
+  const { refreshKey, triggerRefresh } = useRefresh();
+  const [alertsReady, setAlertsReady] = useState(false);
 
   useEffect(() => {
     setIsLoading(true);
@@ -210,12 +211,16 @@ export default function Dashboard() {
       setPos(p);
       setRatings(r);
       setIsLoading(false);
+      if (!alertsReady) {
+        setAlertsReady(true);
+        triggerRefresh();
+      }
     });
     return () => { cancelled = true; };
   }, [refreshKey]);
 
   const totalVendors = vendors.length;
-  const openPOs = pos.filter(p => ['draft', 'pending', 'approved'].includes(p.status)).length;
+  const openPOs = pos.filter(p => ['ordered', 'confirmed', 'in-transit'].includes(p.status)).length;
   const overdueCount = pos.filter(p => isOverdue(p)).length;
   const avgScore = useMemo(() => {
     if (!ratings.length) return 0;
