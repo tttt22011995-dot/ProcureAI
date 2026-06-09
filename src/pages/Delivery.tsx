@@ -464,7 +464,7 @@ export default function Delivery() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
+      <div data-tour="delivery-header">
         <h1 className="text-2xl font-bold" style={{ color: 'var(--text)' }}>Delivery Tracking</h1>
         <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Monitor shipment progress and delivery performance</p>
       </div>
@@ -675,8 +675,7 @@ export default function Delivery() {
       )}
 
       {/* PO Cards Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {filteredAndSorted.map(po => {
+      <div data-tour="delivery-list" className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           const status = po.deliveryStatus || 'ordered';
           const isOverduePO = isOverdueStatus(status, po.deliveryDate);
           const overdueDays = isOverduePO ? getOverdueDays(po.deliveryDate) : 0;
@@ -889,3 +888,4 @@ function StatusBadge({
     </button>
   );
 }
+
