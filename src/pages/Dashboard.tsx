@@ -279,14 +279,7 @@ export default function Dashboard() {
     interaction: { mode: 'index', intersect: false },
     plugins: {
       legend: {
-        position: 'top',
-        labels: {
-          color: '#94A3B8',
-          font: chartFont,
-          usePointStyle: true,
-          pointStyleWidth: 8,
-          padding: 16,
-        },
+        display: false,
       },
       tooltip: {
         backgroundColor: 'rgba(6,17,32,0.92)',
@@ -372,7 +365,18 @@ export default function Dashboard() {
             Showing available data only ({availableMonths} of {requestedMonths} months)
           </div>
         )}
-        <div style={{ height: 380 }}>
+        {/* Custom legend */}
+        <div className="flex items-center gap-5 mb-3 text-xs" style={{ color: 'var(--text-muted)' }}>
+          <div className="flex items-center gap-1.5">
+            <div className="w-3 h-3 rounded" style={{ background: 'rgba(96,165,250,0.5)' }} />
+            <span>PO Count</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div style={{ width: 20, height: 3, borderRadius: 2, background: '#FB923C' }} />
+            <span>Total Spend ($)</span>
+          </div>
+        </div>
+        <div style={{ height: 360 }}>
           {chartError ? (
             <FallbackTable buckets={buckets} />
           ) : (
