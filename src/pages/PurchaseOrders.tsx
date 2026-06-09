@@ -23,7 +23,7 @@ import { useRefresh } from '../lib/RefreshContext';
 
 const TAX_RATE = 0.1;
 
-const STATUSES: PurchaseOrder['status'][] = ['draft', 'pending', 'approved', 'shipped', 'delivered', 'cancelled'];
+const STATUSES: PurchaseOrder['status'][] = ['ordered', 'confirmed', 'in-transit', 'delivered', 'invoiced'];
 
 const STATUS_COLORS: Record<string, string> = {
   ...poStatusColorMap,
@@ -89,6 +89,13 @@ export default function PurchaseOrders() {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const flashRef = useRef<HTMLTableRowElement | null>(null);
+
+  // Delete confirmation
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+
+  // Bulk select
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setIsLoading(true);
@@ -283,7 +290,7 @@ export default function PurchaseOrders() {
         vendorName: vendor.name,
         items: items.filter(i => i.name.trim()),
         total: grandTotal,
-        status: 'draft',
+        status: 'ordered',
         createdAt: new Date().toISOString().split('T')[0],
         deliveryDate,
         priority: 'medium',
@@ -303,7 +310,7 @@ export default function PurchaseOrders() {
     const newPO: PurchaseOrder = {
       ...po,
       id: nextPONumber(),
-      status: 'draft',
+      status: 'ordered',
       createdAt: new Date().toISOString().split('T')[0],
       items: po.items.map(i => ({ ...i, id: generateLineItemId() })),
     };
@@ -322,13 +329,18 @@ export default function PurchaseOrders() {
   // ─── Delete PO ───
 
   const handleDelete = useCallback(async (poId: string) => {
-    if (!window.confirm('Are you sure you want to delete this purchase order?')) return;
-    const success = await deletePurchaseOrderById(poId);
+    setDeleteConfirmId(poId);
+  }, []);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteConfirmId) return;
+    const success = await deletePurchaseOrderById(deleteConfirmId);
     if (success) {
-      setPosState(prev => prev.filter(p => p.id !== poId));
+      setPosState(prev => prev.filter(p => p.id !== deleteConfirmId));
       triggerRefresh();
     }
-  }, [triggerRefresh]);
+    setDeleteConfirmId(null);
+  }, [deleteConfirmId, triggerRefresh]);
 
   // ─── Line Items ───
 
@@ -358,7 +370,6 @@ export default function PurchaseOrders() {
   const removeItem = useCallback((idx: number) => {
     setItems(prev => {
       if (prev.length === 1) {
-        // Clear the only row instead of removing
         return [emptyLineItem()];
       }
       return prev.filter((_, i) => i !== idx);
@@ -503,12 +514,51 @@ export default function PurchaseOrders() {
         ))}
       </div>
 
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="glass-card-solid p-3 flex items-center gap-3">
+          <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+            {selectedIds.size} selected
+          </span>
+          <button
+            className="glass-button"
+            style={{ padding: '6px 14px', fontSize: 13,
+              background: 'var(--red)', color: '#fff', borderColor: 'var(--red)' }}
+            onClick={() => {
+              if (selectedIds.size === 1) {
+                setDeleteConfirmId([...selectedIds][0]);
+              } else {
+                setBulkDeleteOpen(true);
+              }
+            }}
+          >
+            Delete Selected
+          </button>
+          <button
+            className="glass-button"
+            style={{ padding: '6px 14px', fontSize: 13 }}
+            onClick={() => setSelectedIds(new Set())}
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
       {/* PO Table */}
       <div className="glass-card-solid overflow-hidden">
         <div className="overflow-x-auto">
           <table className="glass-table">
             <thead>
               <tr>
+                <th style={{ width: 40 }}>
+                  <input type="checkbox"
+                    checked={filteredAndSorted.length > 0 &&
+                      filteredAndSorted.every(p => selectedIds.has(p.id))}
+                    onChange={e => setSelectedIds(
+                      e.target.checked ? new Set(filteredAndSorted.map(p => p.id)) : new Set()
+                    )}
+                  />
+                </th>
                 <th>PO Number</th>
                 <th>Vendor</th>
                 <th>Date</th>
@@ -521,7 +571,7 @@ export default function PurchaseOrders() {
             <tbody>
               {filteredAndSorted.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-8" style={{ color: 'var(--text-muted)' }}>
+                  <td colSpan={8} className="text-center py-8" style={{ color: 'var(--text-muted)' }}>
                     No purchase orders found
                   </td>
                 </tr>
@@ -537,6 +587,16 @@ export default function PurchaseOrders() {
                         transition: 'background 0.3s',
                       }}
                     >
+                      <td onClick={e => e.stopPropagation()}>
+                        <input type="checkbox"
+                          checked={selectedIds.has(po.id)}
+                          onChange={e => setSelectedIds(prev => {
+                            const next = new Set(prev);
+                            e.target.checked ? next.add(po.id) : next.delete(po.id);
+                            return next;
+                          })}
+                        />
+                      </td>
                       <td className="font-mono font-medium" style={{ color: 'var(--text)' }}>{po.id}</td>
                       <td style={{ color: 'var(--text-secondary)' }}>{po.vendorName}</td>
                       <td style={{ color: 'var(--text-muted)' }}>{po.createdAt}</td>
@@ -790,20 +850,23 @@ export default function PurchaseOrders() {
 
               {/* Totals */}
               <div className="glass-card-solid p-4">
-                <div className="grid grid-cols-3 gap-4 text-sm">
-                  <div>
-                    <div className="text-xs font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>Subtotal</div>
-                    <div className="font-bold" style={{ color: 'var(--text)' }}>${viewingPO.total.toLocaleString()}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>Status</div>
-                    <span className={`glass-badge glass-badge-${STATUS_COLORS[viewingPO.status] ?? 'blue'}`}>
-                      {viewingPO.status}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Subtotal</span>
+                    <span style={{ color: 'var(--text)' }}>
+                      ${(viewingPO.subtotal ?? viewingPO.total).toLocaleString()}
                     </span>
                   </div>
-                  <div className="text-right">
-                    <div className="text-xs font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>Grand Total</div>
-                    <div className="text-xl font-bold" style={{ color: 'var(--blue)' }}>${viewingPO.total.toLocaleString()}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Tax (10%)</span>
+                    <span style={{ color: 'var(--text)' }}>
+                      ${(viewingPO.tax ?? 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 16,
+                    fontWeight: 700, borderTop: '1px solid var(--glass-border)', paddingTop: 8 }}>
+                    <span style={{ color: 'var(--text)' }}>Grand Total</span>
+                    <span style={{ color: 'var(--blue)' }}>${viewingPO.total.toLocaleString()}</span>
                   </div>
                 </div>
               </div>
@@ -813,6 +876,53 @@ export default function PurchaseOrders() {
                 This is a computer-generated document. For questions, contact procurement@procureai.com
               </div>
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ─── Delete Confirmation Modal ─── */}
+      {deleteConfirmId && (
+        <Modal title="Delete Purchase Order" onClose={() => setDeleteConfirmId(null)}>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 24 }}>
+            Are you sure you want to delete{' '}
+            <strong style={{ color: 'var(--text)' }}>
+              {pos.find(p => p.id === deleteConfirmId)?.id}
+            </strong>?
+            This action cannot be undone.
+          </p>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="glass-button" onClick={() => setDeleteConfirmId(null)}>Cancel</button>
+            <button
+              className="glass-button"
+              style={{ background: 'var(--red)', color: '#fff', borderColor: 'var(--red)' }}
+              onClick={confirmDelete}
+            >Delete</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* ─── Bulk Delete Confirmation Modal ─── */}
+      {bulkDeleteOpen && (
+        <Modal title="Delete Purchase Orders" onClose={() => setBulkDeleteOpen(false)}>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 24 }}>
+            Delete <strong style={{ color: 'var(--text)' }}>{selectedIds.size}</strong> purchase orders?
+            This cannot be undone.
+          </p>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="glass-button" onClick={() => setBulkDeleteOpen(false)}>Cancel</button>
+            <button
+              className="glass-button"
+              style={{ background: 'var(--red)', color: '#fff', borderColor: 'var(--red)' }}
+              onClick={async () => {
+                for (const id of selectedIds) {
+                  await deletePurchaseOrderById(id);
+                }
+                setPosState(prev => prev.filter(p => !selectedIds.has(p.id)));
+                setSelectedIds(new Set());
+                setBulkDeleteOpen(false);
+                triggerRefresh();
+              }}
+            >Delete All</button>
           </div>
         </Modal>
       )}
@@ -864,7 +974,6 @@ function VendorCombobox({
           }}
           onFocus={() => setOpen(true)}
           onBlur={() => {
-            // Delay to allow click on option
             setTimeout(() => setOpen(false), 150);
           }}
         />
@@ -940,7 +1049,6 @@ function LineItemRow({
     updateItem(idx, 'name', catalogItem.name);
     updateItem(idx, 'unitPrice', catalogItem.unitPrice);
     setAutocompleteOpen(false);
-    // Focus quantity after selecting
     setTimeout(() => qtyInputRef.current?.focus(), 0);
   };
 
@@ -954,11 +1062,9 @@ function LineItemRow({
           (nameInputs[nameInputs.length - 1] as HTMLInputElement)?.focus();
         }, 0);
       } else if (field === 'name') {
-        // Tab from name focuses quantity
         e.preventDefault();
         qtyInputRef.current?.focus();
       } else if (field === 'qty') {
-        // Tab from quantity focuses price
         e.preventDefault();
         priceInputRef.current?.focus();
       }
@@ -1006,7 +1112,7 @@ function LineItemRow({
             ref={qtyInputRef}
             type="number"
             min={0}
-            className={`glass-input w-full ${error ? '' : ''}`}
+            className="glass-input w-full"
             style={error ? { borderColor: 'var(--red)' } : undefined}
             placeholder="Qty"
             value={item.quantity || ''}
@@ -1055,7 +1161,7 @@ function LineItemRow({
 
 // ─── Modal Wrapper ───
 
-function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+function Modal({ children, onClose, title }: { children: React.ReactNode; onClose: () => void; title?: string }) {
   return (
     <div
       className="fixed inset-0 z-40 flex items-center justify-center p-4"
@@ -1064,7 +1170,15 @@ function Modal({ children, onClose }: { children: React.ReactNode; onClose: () =
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      {children}
+      <div className="glass-panel p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto" style={{ borderRadius: 24 }}>
+        {title && (
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>{title}</h2>
+            <button onClick={onClose} style={{ color: 'var(--text-muted)' }}><X size={18} /></button>
+          </div>
+        )}
+        {children}
+      </div>
     </div>
   );
 }
@@ -1125,10 +1239,15 @@ function printPO(po: PurchaseOrder) {
             `).join('')}
           </tbody>
         </table>
-        <div style="display:flex;justify-content:flex-end;margin-bottom:24px;">
-          <div style="text-align:right;">
-            <div style="font-size:14px;color:#64748B;margin-bottom:4px;">Subtotal: $${po.total.toLocaleString()}</div>
-            <div style="font-size:24px;font-weight:700;color:#2563EB;">Total: $${po.total.toLocaleString()}</div>
+        <div style="border-top:2px solid #E2E8F0;padding-top:16px;margin-top:16px;">
+          <div style="display:flex;justify-content:space-between;font-size:14px;color:#64748B;margin-bottom:8px;">
+            <span>Subtotal</span><span>$${(po.subtotal ?? po.total).toLocaleString()}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:14px;color:#64748B;margin-bottom:8px;">
+            <span>Tax (10%)</span><span>$${(po.tax ?? 0).toLocaleString()}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:20px;font-weight:700;color:#2563EB;">
+            <span>Grand Total</span><span>$${po.total.toLocaleString()}</span>
           </div>
         </div>
         <div style="text-align:center;font-size:12px;color:#94A3B8;padding-top:24px;border-top:2px solid #E2E8F0;">

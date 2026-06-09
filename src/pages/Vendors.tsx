@@ -37,7 +37,7 @@ const STATUS_COLORS: Record<string, string> = {
 const PAYMENT_TERMS = ['Net 30', 'Net 60', 'Net 90'] as const;
 const STATUSES = ['active', 'under-review', 'inactive'] as const;
 
-const OPEN_PO_STATUSES = new Set(['draft', 'pending', 'approved', 'shipped']);
+const OPEN_PO_STATUSES = new Set(['ordered', 'confirmed', 'in-transit']);
 
 // ─── Helpers ───
 
@@ -380,11 +380,16 @@ export default function Vendors() {
         </div>
 
         {/* Count */}
-        <div className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
-          {search
-            ? `${filtered.length} of ${vendors.length} vendors`
-            : `${vendors.length} vendors`}
-        </div>
+        {(() => {
+          const isFiltered = filtered.length !== vendors.length;
+          return (
+            <div className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+              {isFiltered
+                ? `${filtered.length} of ${vendors.length} vendors`
+                : `${vendors.length} vendors`}
+            </div>
+          );
+        })()}
 
         {/* Empty state */}
         {filtered.length === 0 && search && (
@@ -407,7 +412,7 @@ export default function Vendors() {
               >
                 {/* Compare checkbox */}
                 <div
-                  className="absolute top-3 right-3 z-10 opacity-0 group-hover:opacity-100 transition-opacity"
+                  className={`absolute top-3 right-3 z-10 transition-opacity ${isCompareSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                   onClick={e => { e.stopPropagation(); toggleCompare(v.id); }}
                 >
                   <button

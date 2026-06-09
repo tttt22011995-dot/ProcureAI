@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Menu } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './pages/Dashboard';
 import Vendors from './pages/Vendors';
@@ -9,11 +10,13 @@ import AIRisk from './pages/AIRisk';
 import { loadInitialData, type Page } from './lib/data';
 import { PageErrorBoundary } from './components/ErrorBoundary';
 import { RefreshProvider } from './lib/RefreshContext';
+import { ToastProvider } from './lib/ToastContext';
 
 function AppContent() {
   const [page, setPage] = useState<Page>('dashboard');
   const [isDark, setIsDark] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     loadInitialData().finally(() => setIsLoading(false));
@@ -58,8 +61,29 @@ function AppContent() {
         transitionDuration: '220ms',
       }}
     >
-      <Sidebar active={page} onNavigate={setPage} isDark={isDark} onToggleTheme={toggleTheme} />
-      <main className="ml-[220px] p-6 lg:p-8 min-h-screen">
+      <button
+        onClick={() => setSidebarOpen(true)}
+        className="md:hidden glass-button fixed top-4 left-4 z-50 p-2"
+        style={{ borderRadius: 12 }}
+      >
+        <Menu size={20} />
+      </button>
+      {sidebarOpen && (
+        <div
+          className="md:hidden fixed inset-0"
+          style={{ background: 'rgba(0,0,0,0.4)', zIndex: 29 }}
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+      <Sidebar
+        active={page}
+        onNavigate={(p) => { setPage(p); setSidebarOpen(false); }}
+        isDark={isDark}
+        onToggleTheme={toggleTheme}
+        isMobileOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+      />
+      <main className="md:ml-[220px] ml-0 p-4 md:p-6 lg:p-8 min-h-screen">
         <div className="max-w-7xl mx-auto">
           {renderPage()}
         </div>
@@ -71,7 +95,9 @@ function AppContent() {
 function App() {
   return (
     <RefreshProvider>
-      <AppContent />
+      <ToastProvider>
+        <AppContent />
+      </ToastProvider>
     </RefreshProvider>
   );
 }

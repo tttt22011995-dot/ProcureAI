@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import ReactDOM from 'react-dom';
 import {
   Truck, Package, CheckCircle2, AlertTriangle, Search, ChevronUp, ChevronDown,
   FileText, MessageSquare, Calendar, Plus,
@@ -15,6 +16,7 @@ import {
   type DeliveryPerformance,
 } from '../lib/data';
 import { useRefresh } from '../lib/RefreshContext';
+import { useToast } from '../lib/ToastContext';
 
 // ─── Constants ───
 
@@ -112,12 +114,20 @@ function getTodayStr(): string {
 // ─── Main Component ───
 
 export default function Delivery() {
-  const { refreshKey, triggerRefresh } = useRefresh();
+  const { refreshKey } = useRefresh();
+  const { showToast } = useToast();
   const [pos, setPosState] = useState<PurchaseOrder[]>([]);
   const [deliveryPerf, setDeliveryPerfState] = useState<DeliveryPerformance[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  const [search, setSearch] = useState('');
+  const [searchPO, setSearchPO] = useState('');
+  const [searchVendorId, setSearchVendorId] = useState('');
+  const [vendorQuery, setVendorQuery] = useState('');
+  const [vendorDropOpen, setVendorDropOpen] = useState(false);
+  const vendorInputRef = useRef<HTMLInputElement>(null);
+  const vendorPortalRef = useRef<HTMLDivElement>(null);
+  const [vendorDropPos, setVendorDropPos] = useState<{ top: number; left: number; width: number } | null>(null);
+
   const [sortBy, setSortBy] = useState('earliest');
   const [filterStatus, setFilterStatus] = useState<string | null>(null);
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
@@ -132,6 +142,14 @@ export default function Delivery() {
       })
       .finally(() => setIsLoading(false));
   }, [refreshKey]);
+
+  // ─── Vendor options from POs ───
+
+  const vendorOptions = useMemo(() =>
+    Array.from(new Map(pos.map(p => [p.vendorId ?? p.vendorName, p.vendorName])).entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [pos]);
 
   // ─── Computed values ───
 
@@ -155,10 +173,9 @@ export default function Delivery() {
 
   const filteredAndSorted = useMemo(() => {
     let result = pos.filter(po => {
-      const q = search.toLowerCase();
-      const matchSearch = !search ||
-        po.id.toLowerCase().includes(q) ||
-        po.vendorName.toLowerCase().includes(q);
+      const matchPO = !searchPO || po.id.toLowerCase().includes(searchPO.toLowerCase());
+      const matchVendor = !searchVendorId ||
+        po.vendorId === searchVendorId || po.vendorName === searchVendorId;
 
       const status = po.deliveryStatus || 'ordered';
       const isOverduePO = isOverdueStatus(status, po.deliveryDate);
@@ -170,7 +187,7 @@ export default function Delivery() {
         matchFilter = status === filterStatus && !isOverduePO;
       }
 
-      return matchSearch && matchFilter;
+      return matchPO && matchVendor && matchFilter;
     });
 
     // Sort
@@ -198,14 +215,15 @@ export default function Delivery() {
     }
 
     return result;
-  }, [pos, search, sortBy, filterStatus]);
+  }, [pos, searchPO, searchVendorId, sortBy, filterStatus]);
 
-  // ─── Chart Data (Last 10 Orders) ───
+  // ─── Chart Data ───
 
   const chartData = useMemo(() => {
-    if (poCount < 2) return null;
+    const source = searchVendorId ? filteredAndSorted : pos;
+    if (source.length < 2) return null;
 
-    const last10 = [...pos]
+    const last10 = [...source]
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 10);
 
@@ -213,7 +231,20 @@ export default function Delivery() {
     today.setHours(0, 0, 0, 0);
 
     return { last10, today };
-  }, [pos, poCount]);
+  }, [pos, filteredAndSorted, searchVendorId]);
+
+  // ─── Vendor dropdown outside-click ───
+
+  useEffect(() => {
+    if (!vendorDropOpen) return;
+    const close = (e: MouseEvent) => {
+      if (!vendorInputRef.current?.contains(e.target as Node) &&
+          !vendorPortalRef.current?.contains(e.target as Node))
+        setVendorDropOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [vendorDropOpen]);
 
   // ─── Status Badge Click Handler ───
 
@@ -270,9 +301,7 @@ export default function Delivery() {
         return [...filtered, newPerf];
       });
     }
-
-    triggerRefresh();
-  }, [triggerRefresh]);
+  }, []);
 
   const handleRevertStatus = useCallback(async (po: PurchaseOrder) => {
     const currentStatus = po.deliveryStatus || 'ordered';
@@ -291,8 +320,7 @@ export default function Delivery() {
     if (!success) return;
 
     setPosState(prev => prev.map(p => p.id === po.id ? updated : p));
-    triggerRefresh();
-  }, [triggerRefresh]);
+  }, []);
 
   // ─── Notes Handlers ───
 
@@ -323,12 +351,29 @@ export default function Delivery() {
     };
 
     const success = await upsertPurchaseOrder(updated);
-    if (!success) return;
+    if (!success) {
+      showToast('Failed to save', 'error');
+      return;
+    }
 
     setPosState(prev => prev.map(p => p.id === po.id ? updated : p));
     setNewNoteText(prev => ({ ...prev, [po.id]: '' }));
-    triggerRefresh();
-  }, [newNoteText, triggerRefresh]);
+    showToast('Note saved', 'success');
+  }, [newNoteText, showToast]);
+
+  const handleDeleteNote = useCallback(async (po: PurchaseOrder, idx: number) => {
+    const updated = {
+      ...po,
+      deliveryNotes: (po.deliveryNotes || []).filter((_, i) => i !== idx),
+    };
+    const success = await upsertPurchaseOrder(updated);
+    if (success) {
+      setPosState(prev => prev.map(p => p.id === po.id ? updated : p));
+      showToast('Note deleted', 'info');
+    } else {
+      showToast('Failed to save', 'error');
+    }
+  }, [showToast]);
 
   // ─── On-time Badge ───
 
@@ -456,15 +501,44 @@ export default function Delivery() {
 
       {/* Search and Sort */}
       <div className="flex flex-wrap gap-3 items-center">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+        {/* PO Number search */}
+        <input
+          className="glass-input"
+          placeholder="Search PO number…"
+          value={searchPO}
+          onChange={e => setSearchPO(e.target.value)}
+          style={{ flex: 1 }}
+        />
+
+        {/* Vendor combobox */}
+        <div style={{ position: 'relative', flex: 1 }}>
           <input
-            className="glass-input w-full pl-9"
-            placeholder="Search by PO number or vendor..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
+            ref={vendorInputRef}
+            className="glass-input"
+            placeholder="Filter by vendor…"
+            value={vendorQuery}
+            onChange={e => {
+              setVendorQuery(e.target.value);
+              if (!e.target.value) setSearchVendorId('');
+              const r = vendorInputRef.current!.getBoundingClientRect();
+              setVendorDropPos({ top: r.bottom + 4, left: r.left, width: r.width });
+              setVendorDropOpen(true);
+            }}
+            onFocus={() => {
+              const r = vendorInputRef.current!.getBoundingClientRect();
+              setVendorDropPos({ top: r.bottom + 4, left: r.left, width: r.width });
+              setVendorDropOpen(true);
+            }}
           />
+          {searchVendorId && (
+            <button
+              style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+              onClick={() => { setSearchVendorId(''); setVendorQuery(''); }}
+            >✕</button>
+          )}
         </div>
+
         <select
           className="glass-input text-xs py-1.5 px-3"
           value={sortBy}
@@ -475,6 +549,34 @@ export default function Delivery() {
           ))}
         </select>
       </div>
+
+      {/* Vendor dropdown portal */}
+      {vendorDropOpen && vendorDropPos && ReactDOM.createPortal(
+        <div ref={vendorPortalRef} style={{
+          position: 'fixed', top: vendorDropPos.top, left: vendorDropPos.left,
+          width: vendorDropPos.width, zIndex: 9999, maxHeight: 200, overflowY: 'auto',
+          borderRadius: 12,
+        }} className="glass-panel p-1">
+          {vendorOptions
+            .filter(v => !vendorQuery || v.name.toLowerCase().includes(vendorQuery.toLowerCase()))
+            .map(v => (
+              <button key={v.id}
+                className="w-full text-left px-3 py-2 text-sm rounded-lg"
+                style={{ color: 'var(--text)', background: 'transparent', border: 'none', cursor: 'pointer' }}
+                onMouseDown={() => {
+                  setSearchVendorId(v.id);
+                  setVendorQuery(v.name);
+                  setVendorDropOpen(false);
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = 'rgba(96,165,250,0.08)')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              >
+                {v.name}
+              </button>
+            ))}
+        </div>,
+        document.body
+      )}
 
       {/* Timeline Chart */}
       {poCount >= 2 && chartData && (
@@ -689,11 +791,20 @@ export default function Delivery() {
                       <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No notes yet</div>
                     ) : (
                       po.deliveryNotes!.map((note, idx) => (
-                        <div key={idx} className="text-xs p-2 rounded-lg" style={{ background: 'var(--surface)', color: 'var(--text-secondary)' }}>
-                          <div className="text-[10px] mb-1" style={{ color: 'var(--text-muted)' }}>
-                            {new Date(note.timestamp).toLocaleString()}
+                        <div key={idx} className="text-xs p-2 rounded-lg flex items-start justify-between gap-2" style={{ background: 'var(--surface)', color: 'var(--text-secondary)' }}>
+                          <div>
+                            <div className="text-[10px] mb-1" style={{ color: 'var(--text-muted)' }}>
+                              {new Date(note.timestamp).toLocaleString()}
+                            </div>
+                            {note.text}
                           </div>
-                          {note.text}
+                          <button
+                            onClick={() => handleDeleteNote(po, idx)}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer',
+                              color: 'var(--text-muted)', padding: '2px 4px', borderRadius: 4,
+                              flexShrink: 0 }}
+                            title="Delete note"
+                          >✕</button>
                         </div>
                       ))
                     )}
