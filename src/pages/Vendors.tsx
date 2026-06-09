@@ -103,7 +103,7 @@ export default function Vendors() {
       setIsLoading(false);
     });
     return () => { cancelled = true; };
-  }, [<think>Key]);
+  }, [refreshKey]);
 
   // ─── Filtering & Sorting ───
 

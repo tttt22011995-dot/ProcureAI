@@ -148,7 +148,7 @@ export default function Delivery() {
         setIsLoading(false);
       });
     return () => { cancelled = true; };
-  }, [<think>Key]);
+  }, [refreshKey]);
 
   // ─── Vendor options from POs ───
 
