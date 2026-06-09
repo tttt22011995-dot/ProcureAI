@@ -8,19 +8,9 @@ import Scorecard from './pages/Scorecard';
 import AiRisk from './pages/AiRisk';
 import { seedData, type Page } from './lib/data';
 
-function getInitialTheme(): boolean {
-  try {
-    const stored = localStorage.getItem('theme');
-    if (stored === 'light') return false;
-    return true;
-  } catch {
-    return true;
-  }
-}
-
 function App() {
   const [page, setPage] = useState<Page>('dashboard');
-  const [isDark, setIsDark] = useState(getInitialTheme);
+  const [isDark, setIsDark] = useState(true);
 
   useEffect(() => {
     seedData();

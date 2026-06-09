@@ -59,32 +59,44 @@ export interface DeliveryPerformance {
   delayDays: number;
 }
 
-// ─── localStorage helpers ───
+// ─── In-Memory Store (with localStorage fallback) ───
 
-function read<T>(key: string): T[] {
+const store = {
+  vendors: [] as Vendor[],
+  purchaseOrders: [] as PurchaseOrder[],
+  vendorRatings: [] as VendorRating[],
+  deliveryPerformance: [] as DeliveryPerformance[],
+};
+
+function persistToStorage(key: string, data: unknown): void {
   try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch {}
 }
 
-function write<T>(key: string, data: T[]): void {
-  localStorage.setItem(key, JSON.stringify(data));
-}
+export const getVendors = () => store.vendors;
+export const setVendors = (v: Vendor[]) => {
+  store.vendors = v;
+  persistToStorage('vendors', v);
+};
 
-export const getVendors = () => read<Vendor>('vendors');
-export const setVendors = (v: Vendor[]) => write('vendors', v);
+export const getPurchaseOrders = () => store.purchaseOrders;
+export const setPurchaseOrders = (po: PurchaseOrder[]) => {
+  store.purchaseOrders = po;
+  persistToStorage('purchaseOrders', po);
+};
 
-export const getPurchaseOrders = () => read<PurchaseOrder>('purchaseOrders');
-export const setPurchaseOrders = (po: PurchaseOrder[]) => write('purchaseOrders', po);
+export const getVendorRatings = () => store.vendorRatings;
+export const setVendorRatings = (vr: VendorRating[]) => {
+  store.vendorRatings = vr;
+  persistToStorage('vendorRatings', vr);
+};
 
-export const getVendorRatings = () => read<VendorRating>('vendorRatings');
-export const setVendorRatings = (vr: VendorRating[]) => write('vendorRatings', vr);
-
-export const getDeliveryPerformance = () => read<DeliveryPerformance>('deliveryPerformance');
-export const setDeliveryPerformance = (dp: DeliveryPerformance[]) => write('deliveryPerformance', dp);
+export const getDeliveryPerformance = () => store.deliveryPerformance;
+export const setDeliveryPerformance = (dp: DeliveryPerformance[]) => {
+  store.deliveryPerformance = dp;
+  persistToStorage('deliveryPerformance', dp);
+};
 
 export function getVendorById(id: string): Vendor | undefined {
   return getVendors().find(v => v.id === id);
@@ -382,3 +394,6 @@ export function seedData(): void {
   setVendorRatings(sampleRatings);
   setDeliveryPerformance(sampleDeliveries);
 }
+
+// Auto-seed on module load so data is available immediately
+seedData();
