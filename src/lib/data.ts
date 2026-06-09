@@ -21,6 +21,9 @@ export interface Vendor {
   minOrder: number;
   paymentTerms: string;
   certifications: string[];
+  contact?: string | null;
+  phone?: string | null;
+  notes?: string | null;
 }
 
 export interface LineItem {
@@ -259,6 +262,9 @@ function mapVendorRow(row: any): Vendor {
     minOrder: row.min_order,
     paymentTerms: row.payment_terms,
     certifications: row.certifications ?? [],
+    contact: row.contact ?? null,
+    phone: row.phone ?? null,
+    notes: row.notes ?? null,
   };
 }
 
@@ -280,6 +286,9 @@ function vendorToDb(v: Vendor): any {
     min_order: v.minOrder,
     payment_terms: v.paymentTerms,
     certifications: v.certifications,
+    contact: v.contact ?? null,
+    phone: v.phone ?? null,
+    notes: v.notes ?? null,
   };
 }
 
