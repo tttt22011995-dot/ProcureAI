@@ -244,7 +244,12 @@ export default function PurchaseOrders() {
   const validateForm = useCallback((): boolean => {
     const e: Record<string, string> = {};
     if (!selectedVendorId) e.vendor = 'Please select a vendor';
-    if (!deliveryDate) e.deliveryDate = 'Delivery date is required';
+    if (!deliveryDate) {
+      e.deliveryDate = 'Delivery date is required';
+    } else {
+      const today = new Date().toISOString().split('T')[0];
+      if (deliveryDate < today) e.deliveryDate = 'Delivery date cannot be in the past';
+    }
     const validItems = items.filter(i => i.name.trim() && i.quantity > 0);
     if (validItems.length === 0) e.items = 'At least one line item is required';
     items.forEach((item, idx) => {
@@ -367,6 +372,15 @@ export default function PurchaseOrders() {
       return prev.filter((_, i) => i !== idx);
     });
   }, []);
+
+  // ─── Clear items error when items change ───
+
+  useEffect(() => {
+    const hasValidItem = items.some(i => i.name.trim() && i.quantity > 0);
+    if (hasValidItem) {
+      setErrors(prev => { const next = { ...prev }; delete next.items; return next; });
+    }
+  }, [items]);
 
   // ─── Subtotals ───
 
@@ -569,11 +583,31 @@ export default function PurchaseOrders() {
                 </div>
                 <div>
                   <label className="text-xs font-semibold uppercase block mb-1" style={{ color: 'var(--text-muted)' }}>Vendor *</label>
-                  <VendorCombobox vendors={vendors} value={selectedVendorId} onChange={setSelectedVendorId} error={errors.vendor} />
+                  <VendorCombobox vendors={vendors} value={selectedVendorId} onChange={id => { setSelectedVendorId(id); setErrors(prev => { const next = { ...prev }; delete next.vendor; return next; }); }} error={errors.vendor} />
                 </div>
                 <div>
                   <label className="text-xs font-semibold uppercase block mb-1" style={{ color: 'var(--text-muted)' }}>Expected Delivery Date *</label>
-                  <input type="date" className={`glass-input w-full ${errors.deliveryDate ? 'border-[var(--red)]' : ''}`} style={errors.deliveryDate ? { borderColor: 'var(--red)' } : undefined} value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)} />
+                  <input
+                    type="date"
+                    className={`glass-input w-full ${errors.deliveryDate ? 'border-[var(--red)]' : ''}`}
+                    style={errors.deliveryDate ? { borderColor: 'var(--red)' } : undefined}
+                    value={deliveryDate}
+                    min={new Date().toISOString().split('T')[0]}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setDeliveryDate(val);
+                      if (val) {
+                        const today = new Date().toISOString().split('T')[0];
+                        if (val < today) {
+                          setErrors(prev => ({ ...prev, deliveryDate: 'Delivery date cannot be in the past' }));
+                        } else {
+                          setErrors(prev => { const next = { ...prev }; delete next.deliveryDate; return next; });
+                        }
+                      } else {
+                        setErrors(prev => { const next = { ...prev }; delete next.deliveryDate; return next; });
+                      }
+                    }}
+                  />
                   {errors.deliveryDate && <div className="text-xs mt-1" style={{ color: 'var(--red)' }}>{errors.deliveryDate}</div>}
                 </div>
                 <div>
