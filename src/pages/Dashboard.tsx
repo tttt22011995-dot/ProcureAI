@@ -193,9 +193,26 @@ export default function Dashboard() {
     ]).finally(() => setIsLoading(false));
   }, [refreshKey]);
 
-  const vendors = getVendors();
-  const pos = getPurchaseOrders();
-  const ratings = getVendorRatings();
+  const [vendors, setVendors] = useState([] as ReturnType<typeof getVendors>);
+  const [pos, setPos] = useState([] as ReturnType<typeof getPurchaseOrders>);
+  const [ratings, setRatings] = useState([] as ReturnType<typeof getVendorRatings>);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+    Promise.all([
+      fetchVendors(),
+      fetchPurchaseOrders(),
+      fetchVendorRatings(),
+    ]).then(([v, p, r]) => {
+      if (cancelled) return;
+      setVendors(v);
+      setPos(p);
+      setRatings(r);
+      setIsLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [refreshKey]);
 
   const totalVendors = vendors.length;
   const openPOs = pos.filter(p => ['draft', 'pending', 'approved'].includes(p.status)).length;

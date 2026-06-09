@@ -128,20 +128,29 @@ export default function Scorecard() {
   const { refreshKey } = useRefresh();
   const [isLoading, setIsLoading] = useState(false);
 
+  const [vendors, setVendors] = useState([] as ReturnType<typeof getVendors>);
+  const [pos, setPos] = useState([] as ReturnType<typeof getPurchaseOrders>);
+  const [ratings, setRatings] = useState([] as ReturnType<typeof getVendorRatings>);
+  const [deliveryPerf, setDeliveryPerf] = useState([] as ReturnType<typeof getDeliveryPerformance>);
+
   useEffect(() => {
+    let cancelled = false;
     setIsLoading(true);
     Promise.all([
       fetchVendors(),
       fetchPurchaseOrders(),
       fetchVendorRatings(),
       fetchDeliveryPerformance(),
-    ]).finally(() => setIsLoading(false));
+    ]).then(([v, p, r, d]) => {
+      if (cancelled) return;
+      setVendors(v);
+      setPos(p);
+      setRatings(r);
+      setDeliveryPerf(d);
+      setIsLoading(false);
+    });
+    return () => { cancelled = true; };
   }, [refreshKey]);
-
-  const vendors = getVendors();
-  const pos = getPurchaseOrders();
-  const ratings = getVendorRatings();
-  const deliveryPerf = getDeliveryPerformance();
 
   const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);

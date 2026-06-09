@@ -7,6 +7,7 @@ import {
   Truck,
   BarChart3,
   ShieldAlert,
+  Package,
   Bell,
   Sun,
   Moon,
@@ -34,6 +35,7 @@ const navItems: { page: Page; label: string; icon: React.ElementType }[] = [
   { page: 'delivery', label: 'Delivery', icon: Truck },
   { page: 'scorecard', label: 'Scorecard', icon: BarChart3 },
   { page: 'ai-risk', label: 'AI Risk', icon: ShieldAlert },
+  { page: 'catalog', label: 'Catalog', icon: Package },
 ];
 
 const alertIcon: Record<string, React.ElementType> = {
@@ -59,7 +61,7 @@ export default function Sidebar({ active, onNavigate, isDark, onToggleTheme, isM
   // Refresh alerts when data changes
   useEffect(() => {
     // computeAlerts reads from cache, which is updated on refresh
-  }, [refreshKey]);
+  }, [<think>Key]);
 
   useEffect(() => {
     if (!dropdownOpen) return;

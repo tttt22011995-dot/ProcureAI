@@ -1,176 +1,189 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
-  Search, Plus, Download, X, Pencil, Trash2, Check, Star, Mail, Phone, Clock, FileText,
+  Search, MapPin, Package, Star, TrendingUp, TrendingDown, Minus,
+  Shield, AlertTriangle, ChevronDown, ChevronUp, Plus, Pencil,
+  Trash2, X, Check, Copy,
 } from 'lucide-react';
 import {
   fetchVendors,
   fetchPurchaseOrders,
-  fetchVendorRatings,
-  getVendors,
-  getPurchaseOrders,
-  getVendorRatings,
   upsertVendor,
-  deleteVendor,
-  nextVendorCode,
+  deleteVendorById,
+  nextVendorId,
+  statusColorMap,
   type Vendor,
-  type VendorRating,
   type PurchaseOrder,
 } from '../lib/data';
 import { useRefresh } from '../lib/RefreshContext';
 
 // ─── Constants ───
 
-const CATEGORIES = ['Electronics', 'Logistics', 'Raw Materials', 'Office Supplies', 'IT Services', 'Packaging'] as const;
-const CATEGORY_COLORS: Record<string, string> = {
-  Electronics: 'blue',
-  Logistics: 'green',
-  'Raw Materials': 'orange',
-  'Office Supplies': 'purple',
-  'IT Services': 'orange',
-  Packaging: 'cyan',
-};
-const STATUS_COLORS: Record<string, string> = {
-  active: 'green',
-  'under-review': 'orange',
-  inactive: 'red',
-};
-const PAYMENT_TERMS = ['Net 30', 'Net 60', 'Net 90'] as const;
-const STATUSES = ['active', 'under-review', 'inactive'] as const;
+const CATEGORIES = ['Electronics', 'Automotive', 'Logistics', 'Textiles', 'Chemicals', 'Metals', 'Packaging', 'Agriculture', 'Medical', 'Construction'];
+
+const PAYMENT_TERMS = ['Net 15', 'Net 30', 'Net 45', 'Net 60'];
 
 const OPEN_PO_STATUSES = new Set(['ordered', 'confirmed', 'in-transit']);
 
+const SORT_OPTIONS = [
+  { value: 'name', label: 'Name' },
+  { value: 'risk', label: 'Risk Score' },
+  { value: 'delivery', label: 'Delivery Score' },
+  { value: 'quality', label: 'Quality Score' },
+];
+
 // ─── Helpers ───
 
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  return parts.length >= 2
-    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-    : name.slice(0, 2).toUpperCase();
+function getScoreColor(score: number): string {
+  if (score >= 90) return 'var(--green)';
+  if (score >= 70) return 'var(--blue)';
+  if (score >= 50) return 'var(--orange)';
+  return 'var(--red)';
 }
 
-function normalize(s: string): string {
-  return s.trim().toLowerCase();
+function getScoreIcon(score: number) {
+  if (score >= 90) return TrendingUp;
+  if (score >= 70) return Minus;
+  return TrendingDown;
 }
 
-function highlightMatch(text: string, term: string): React.ReactNode {
-  if (!term) return text;
-  const idx = normalize(text).indexOf(normalize(term));
-  if (idx === -1) return text;
-  const start = idx;
-  const end = idx + term.length;
-  return (
-    <>
-      {text.slice(0, start)}
-      <mark style={{ background: '#FACC15', color: 'var(--text)', borderRadius: 2, padding: '0 1px' }}>
-        {text.slice(start, end)}
-      </mark>
-      {text.slice(end)}
-    </>
-  );
+function getRiskColor(level: string): string {
+  return statusColorMap[level] ?? 'gray';
 }
 
-function countOpenPOs(vendor: Vendor, pos: PurchaseOrder[]): number {
-  return pos.filter(po => {
-    const matchId = po.vendorId === vendor.id;
-    const matchName = !matchId && normalize(po.vendorName) === normalize(vendor.name);
-    return (matchId || matchName) && OPEN_PO_STATUSES.has(po.status);
-  }).length;
-}
-
-function lastOrderDate(vendorId: string, pos: PurchaseOrder[]): string {
-  const vendorPOs = pos.filter(po => po.vendorId === vendorId);
-  if (!vendorPOs.length) return '';
-  return vendorPOs.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0].createdAt;
-}
-
-// ─── Empty vendor template ───
-
-function emptyVendor(code: string): Vendor {
-  return {
-    id: `v_${Date.now()}`,
-    vendorCode: code,
-    name: '',
-    category: CATEGORIES[0],
-    location: '',
-    rating: 0,
-    status: 'active',
-    contractEnd: '',
-    email: '',
-    spend: 0,
-    contact: '',
-    phone: '',
-    paymentTerms: 'Net 30',
-    leadTime: 0,
-    notes: '',
-  };
-}
-
-// ─── Component ───
+// ─── Main Component ───
 
 export default function Vendors() {
-  const [vendors, setVendorsState] = useState<Vendor[]>([]);
+  const { refreshKey, triggerRefresh } = useRefresh();
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
-  const [selected, setSelected] = useState<Vendor | null>(null);
-  const [compareIds, setCompareIds] = useState<Set<string>>(new Set());
-  const [showCompare, setShowCompare] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
+  const [sortBy, setSortBy] = useState('name');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // Modal state
+  // Modal states
   const [modalOpen, setModalOpen] = useState(false);
   const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
-  const [form, setForm] = useState<Vendor>(emptyVendor('VND-000'));
+
+  // Form states
+  const [formName, setFormName] = useState('');
+  const [formCategory, setFormCategory] = useState('');
+  const [formLocation, setFormLocation] = useState('');
+  const [formStatus, setFormStatus] = useState<'active' | 'inactive' | 'suspended'>('active');
+  const [formRiskScore, setFormRiskScore] = useState(50);
+  const [formDelivery, setFormDelivery] = useState(80);
+  const [formQuality, setFormQuality] = useState(80);
+  const [formCost, setFormCost] = useState(80);
+  const [formSustainability, setFormSustainability] = useState(80);
+  const [formInnovation, setFormInnovation] = useState(80);
+  const [formLeadTime, setFormLeadTime] = useState(14);
+  const [formMinOrder, setFormMinOrder] = useState(1000);
+  const [formPaymentTerms, setFormPaymentTerms] = useState('Net 30');
+  const [formCertifications, setFormCertifications] = useState<string[]>([]);
+  const [certInput, setCertInput] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Delete confirmation
-  const [deleteTarget, setDeleteTarget] = useState<Vendor | null>(null);
+  // Compare
+  const [compareIds, setCompareIds] = useState<Set<string>>(new Set());
+  const [compareOpen, setCompareOpen] = useState(false);
 
-  const { refreshKey, triggerRefresh } = useRefresh();
+  // Delete confirmation
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     setIsLoading(true);
-    Promise.all([
-      fetchVendors(),
-      fetchPurchaseOrders(),
-      fetchVendorRatings(),
-    ]).finally(() => setIsLoading(false));
-  }, [refreshKey]);
+    Promise.all([fetchVendors(), fetchPurchaseOrders()]).then(([v, p]) => {
+      if (cancelled) return;
+      setVendors(v);
+      setPurchaseOrders(p);
+      setIsLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [<think>Key]);
 
-  const pos = getPurchaseOrders();
-  const ratings = getVendorRatings();
-
-  // ─── Filtered vendors ───
+  // ─── Filtering & Sorting ───
 
   const filtered = useMemo(() => {
-    const q = normalize(search);
-    return vendors.filter(v => {
-      const matchCategory = filterCategory === 'all' || v.category === filterCategory;
-      const matchStatus = filterStatus === 'all' || v.status === filterStatus;
-      const matchSearch = !q || [
-        v.name, v.contact, v.email, v.category,
-      ].some(f => normalize(f).includes(q));
-      return matchCategory && matchStatus && matchSearch;
-    });
-  }, [vendors, search, filterCategory, filterStatus]);
+    let result = [...vendors];
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter(v =>
+        v.name.toLowerCase().includes(q) ||
+        v.category.toLowerCase().includes(q) ||
+        v.location.toLowerCase().includes(q)
+      );
+    }
+    if (filterCategory !== 'all') {
+      result = result.filter(v => v.category === filterCategory);
+    }
+    if (filterStatus !== 'all') {
+      result = result.filter(v => v.status === filterStatus);
+    }
+    switch (sortBy) {
+      case 'name': result.sort((a, b) => a.name.localeCompare(b.name)); break;
+      case 'risk': result.sort((a, b) => b.riskScore - a.riskScore); break;
+      case 'delivery': result.sort((a, b) => b.deliveryScore - a.deliveryScore); break;
+      case 'quality': result.sort((a, b) => b.qualityScore - a.qualityScore); break;
+    }
+    return result;
+  }, [vendors, search, filterCategory, filterStatus, sortBy]);
 
-  // ─── Modal open/close ───
+  // ─── Stats ───
 
-  const openAddModal = useCallback(() => {
-    const code = nextVendorCode();
+  const stats = useMemo(() => {
+    const total = vendors.length;
+    const active = vendors.filter(v => v.status === 'active').length;
+    const avgRisk = total > 0 ? Math.round(vendors.reduce((s, v) => s + v.riskScore, 0) / total) : 0;
+    const avgDelivery = total > 0 ? Math.round(vendors.reduce((s, v) => s + v.deliveryScore, 0) / total) : 0;
+    return { total, active, avgRisk, avgDelivery, showing: filtered.length };
+  }, [vendors, filtered.length]);
+
+  // ─── Modal Handlers ───
+
+  const openCreateModal = useCallback(() => {
     setEditingVendor(null);
-    setForm(emptyVendor(code));
+    setFormName('');
+    setFormCategory(CATEGORIES[0]);
+    setFormLocation('');
+    setFormStatus('active');
+    setFormRiskScore(50);
+    setFormDelivery(80);
+    setFormQuality(80);
+    setFormCost(80);
+    setFormSustainability(80);
+    setFormInnovation(80);
+    setFormLeadTime(14);
+    setFormMinOrder(1000);
+    setFormPaymentTerms('Net 30');
+    setFormCertifications([]);
+    setCertInput('');
     setErrors({});
     setModalOpen(true);
   }, []);
 
-  const openEditModal = useCallback((v: Vendor) => {
-    setEditingVendor(v);
-    setForm({ ...v });
+  const openEditModal = useCallback((vendor: Vendor) => {
+    setEditingVendor(vendor);
+    setFormName(vendor.name);
+    setFormCategory(vendor.category);
+    setFormLocation(vendor.location);
+    setFormStatus(vendor.status);
+    setFormRiskScore(vendor.riskScore);
+    setFormDelivery(vendor.deliveryScore);
+    setFormQuality(vendor.qualityScore);
+    setFormCost(vendor.costScore);
+    setFormSustainability(vendor.sustainabilityScore);
+    setFormInnovation(vendor.innovationScore);
+    setFormLeadTime(vendor.leadTime);
+    setFormMinOrder(vendor.minOrder);
+    setFormPaymentTerms(vendor.paymentTerms);
+    setFormCertifications([...vendor.certifications]);
+    setCertInput('');
     setErrors({});
     setModalOpen(true);
-    setSelected(null);
   }, []);
 
   const closeModal = useCallback(() => {
@@ -179,108 +192,96 @@ export default function Vendors() {
     setErrors({});
   }, []);
 
-  // ─── Form validation ───
+  // ─── Form Validation ───
 
-  const validate = (): boolean => {
+  const validateForm = useCallback((): boolean => {
     const e: Record<string, string> = {};
-    if (!form.name.trim()) e.name = 'Company name is required';
-    if (!form.email.trim()) e.email = 'Email is required';
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) e.email = 'Invalid email';
+    if (!formName.trim()) e.name = 'Vendor name is required';
+    if (!formCategory) e.category = 'Category is required';
+    if (!formLocation.trim()) e.location = 'Location is required';
     setErrors(e);
     return Object.keys(e).length === 0;
-  };
+  }, [formName, formCategory, formLocation]);
 
-  // ─── Save ───
+  // ─── Save Vendor ───
 
   const handleSave = useCallback(async () => {
-    if (!validate()) return;
-    setIsSaving(true);
-    try {
-      const success = await upsertVendor(form);
-      if (success) {
-        if (editingVendor) {
-          setVendorsState(prev => prev.map(v => v.id === editingVendor.id ? { ...form } : v));
-        } else {
-          setVendorsState(prev => [...prev, { ...form }]);
-        }
-        triggerRefresh();
-      }
-      closeModal();
-    } finally {
-      setIsSaving(false);
+    if (!validateForm()) return;
+    const vendor: Vendor = {
+      id: editingVendor?.id ?? nextVendorId(vendors),
+      name: formName.trim(),
+      category: formCategory,
+      location: formLocation.trim(),
+      status: formStatus,
+      riskScore: formRiskScore,
+      riskLevel: formRiskScore >= 60 ? 'high' : formRiskScore >= 30 ? 'medium' : 'low',
+      deliveryScore: formDelivery,
+      qualityScore: formQuality,
+      costScore: formCost,
+      sustainabilityScore: formSustainability,
+      innovationScore: formInnovation,
+      leadTime: formLeadTime,
+      minOrder: formMinOrder,
+      paymentTerms: formPaymentTerms,
+      certifications: formCertifications,
+    };
+    const success = await upsertVendor(vendor);
+    if (!success) return;
+    if (editingVendor) {
+      const next = vendors.map(v => v.id === editingVendor.id ? vendor : v);
+      setVendors(next);
+    } else {
+      setVendors(prev => [...prev, vendor]);
     }
-  }, [form, editingVendor, closeModal, triggerRefresh]);
+    triggerRefresh();
+    closeModal();
+  }, [validateForm, editingVendor, vendors, formName, formCategory, formLocation, formStatus, formRiskScore, formDelivery, formQuality, formCost, formSustainability, formInnovation, formLeadTime, formMinOrder, formPaymentTerms, formCertifications, triggerRefresh, closeModal]);
 
-  // ─── Delete ───
+  // ─── Delete Vendor ───
 
-  const handleDelete = useCallback(async (v: Vendor) => {
-    setIsSaving(true);
-    try {
-      const success = await deleteVendor(v.id);
-      if (success) {
-        setVendorsState(prev => prev.filter(x => x.id !== v.id));
-        setDeleteTarget(null);
-        if (selected?.id === v.id) setSelected(null);
-        setCompareIds(prev => { const n = new Set(prev); n.delete(v.id); return n; });
-        triggerRefresh();
-      }
-    } finally {
-      setIsSaving(false);
+  const handleDelete = useCallback((id: string) => {
+    setDeleteConfirmId(id);
+  }, []);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteConfirmId) return;
+    const success = await deleteVendorById(deleteConfirmId);
+    if (success) {
+      const next = vendors.filter(v => v.id !== deleteConfirmId);
+      setVendors(next);
+      setCompareIds(prev => { const n = new Set(prev); n.delete(deleteConfirmId); return n; });
+      triggerRefresh();
     }
-  }, [selected, triggerRefresh]);
+    setDeleteConfirmId(null);
+  }, [deleteConfirmId, vendors, triggerRefresh]);
 
-  // ─── Compare toggle ───
+  // ─── Compare ───
 
   const toggleCompare = useCallback((id: string) => {
     setCompareIds(prev => {
       const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        if (next.size >= 2) return prev; // block 3rd
-        next.add(id);
-      }
+      if (next.has(id)) next.delete(id);
+      else if (next.size < 3) next.add(id);
       return next;
     });
   }, []);
-
-  // ─── Export CSV ───
-
-  const exportCSV = useCallback(() => {
-    if (!filtered.length) {
-      alert('No vendors to export');
-      return;
-    }
-    const headers = ['Vendor Code', 'Company Name', 'Contact', 'Email', 'Phone', 'Category', 'Status', 'Payment Terms', 'Lead Time (days)', 'Location', 'Rating'];
-    const rows = filtered.map(v => [
-      v.vendorCode, v.name, v.contact, v.email, v.phone, v.category, v.status, v.paymentTerms, String(v.leadTime), v.location, String(v.rating),
-    ]);
-    const csv = [headers, ...rows].map(r => r.map(c => `"${c.replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'vendors.csv';
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [filtered]);
-
-  // ─── Rating lookup ───
-
-  const ratingFor = (id: string): VendorRating | undefined => ratings.find(r => r.vendorId === id);
-  const openPOCount = (v: Vendor) => countOpenPOs(v, pos);
-
-  // ─── Compare data ───
 
   const compareVendors = useMemo(() => {
     return vendors.filter(v => compareIds.has(v.id));
   }, [vendors, compareIds]);
 
-  // ─── Initial data ───
+  // ─── Certifications ───
 
-  useEffect(() => {
-    setVendorsState(getVendors());
-  }, [isLoading]);
+  const addCertification = useCallback(() => {
+    const val = certInput.trim();
+    if (!val || formCertifications.includes(val)) return;
+    setFormCertifications(prev => [...prev, val]);
+    setCertInput('');
+  }, [certInput, formCertifications]);
+
+  const removeCertification = useCallback((cert: string) => {
+    setFormCertifications(prev => prev.filter(c => c !== cert));
+  }, []);
 
   // ─── Render ───
 
@@ -293,618 +294,344 @@ export default function Vendors() {
   }
 
   return (
-    <div className="flex gap-6">
-      {/* Left filter panel */}
-      <div className="hidden lg:flex flex-col gap-4 w-[200px] flex-shrink-0">
-        <div className="glass-card-solid p-4">
-          <h4 className="text-xs font-semibold uppercase mb-3" style={{ color: 'var(--text-muted)' }}>Category</h4>
-          <div className="flex flex-col gap-1.5">
-            <button
-              className={`glass-button text-xs text-left ${filterCategory === 'all' ? 'glass-button-primary' : ''}`}
-              onClick={() => setFilterCategory('all')}
-            >All</button>
-            {CATEGORIES.map(c => (
-              <button
-                key={c}
-                className={`glass-button text-xs text-left ${filterCategory === c ? 'glass-button-primary' : ''}`}
-                onClick={() => setFilterCategory(c)}
-              >{c}</button>
-            ))}
-          </div>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--text)' }}>Vendors</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Manage supplier relationships and performance</p>
         </div>
-        <div className="glass-card-solid p-4">
-          <h4 className="text-xs font-semibold uppercase mb-3" style={{ color: 'var(--text-muted)' }}>Status</h4>
-          <div className="flex flex-col gap-1.5">
-            <button
-              className={`glass-button text-xs text-left ${filterStatus === 'all' ? 'glass-button-primary' : ''}`}
-              onClick={() => setFilterStatus('all')}
-            >All</button>
-            {STATUSES.map(s => (
-              <button
-                key={s}
-                className={`glass-button text-xs text-left ${filterStatus === s ? 'glass-button-primary' : ''}`}
-                onClick={() => setFilterStatus(s)}
-              >{s.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}</button>
-            ))}
-          </div>
-        </div>
+        <button className="glass-button glass-button-primary flex items-center gap-2" onClick={openCreateModal}>
+          <Plus size={16} /> Add Vendor
+        </button>
       </div>
 
-      {/* Main content */}
-      <div className="flex-1 min-w-0 space-y-5">
-        {/* Header */}
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text)' }}>
-            Vendor Directory
-          </h1>
-          <div className="flex items-center gap-2">
-            <button className="glass-button flex items-center gap-2 text-xs" onClick={exportCSV}>
-              <Download size={14} /> Export CSV
-            </button>
-            <button className="glass-button glass-button-primary flex items-center gap-2 text-xs" onClick={openAddModal} disabled={isSaving}>
-              <Plus size={14} /> Add Vendor
-            </button>
-          </div>
-        </div>
+      {/* Stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard label="Total Vendors" value={stats.total} color="blue" />
+        <StatCard label="Active" value={stats.active} color="green" />
+        <StatCard label="Avg Risk" value={stats.avgRisk} color={stats.avgRisk >= 60 ? 'red' : stats.avgRisk >= 30 ? 'orange' : 'green'} suffix="/100" />
+        <StatCard label="Avg Delivery" value={stats.avgDelivery} color="blue" suffix="/100" />
+      </div>
 
-        {/* Search bar */}
-        <div className="relative">
+      {/* Compare Bar */}
+      {compareIds.size > 0 && (
+        <div className="glass-card-solid p-3 flex items-center gap-3 flex-wrap">
+          <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>{compareIds.size} selected for comparison</span>
+          <button className="glass-button glass-button-primary text-xs py-1 px-3" onClick={() => setCompareOpen(true)}>Compare</button>
+          <button className="glass-button text-xs py-1 px-3" onClick={() => setCompareIds(new Set())}>Clear</button>
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3 items-center">
+        <div className="relative flex-1 min-w-[200px]">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
-          <input
-            className="glass-input w-full pl-9 pr-10"
-            placeholder="Search vendors by company, contact, email, category..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-          {search && (
-            <button
-              className="absolute right-3 top-1/2 -translate-y-1/2"
-              style={{ color: 'var(--text-muted)' }}
-              onClick={() => setSearch('')}
-            >
-              <X size={14} />
-            </button>
-          )}
+          <input className="glass-input w-full pl-9" placeholder="Search vendors..." value={search} onChange={e => setSearch(e.target.value)} />
         </div>
+        <select className="glass-input text-xs py-1.5 px-2" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
+          <option value="all">All Categories</option>
+          {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select className="glass-input text-xs py-1.5 px-2" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+          <option value="all">All Statuses</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+          <option value="suspended">Suspended</option>
+        </select>
+        <select className="glass-input text-xs py-1.5 px-2" value={sortBy} onChange={e => setSortBy(e.target.value)}>
+          {SORT_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+        </select>
+      </div>
 
-        {/* Mobile filters */}
-        <div className="flex lg:hidden flex-wrap gap-2">
-          <select className="glass-input text-xs py-1.5 px-2" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
-            <option value="all">All Categories</option>
-            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <select className="glass-input text-xs py-1.5 px-2" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-            <option value="all">All Statuses</option>
-            {STATUSES.map(s => <option key={s} value={s}>{s.replace('-', ' ')}</option>)}
-          </select>
-        </div>
+      {/* Count */}
+      {(() => {
+        const isFiltered = filtered.length !== vendors.length;
+        return (
+          <div className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+            {isFiltered ? `${filtered.length} of ${vendors.length} vendors` : `${vendors.length} vendors`}
+          </div>
+        );
+      })()}
 
-        {/* Count */}
-        {(() => {
-          const isFiltered = filtered.length !== vendors.length;
+      {/* Vendor Cards */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {filtered.map(vendor => {
+          const isExpanded = expandedId === vendor.id;
+          const isCompareSelected = compareIds.has(vendor.id);
+          const openPOs = purchaseOrders.filter(po => po.vendorId === vendor.id && OPEN_PO_STATUSES.has(po.status)).length;
+          const ScoreIcon = getScoreIcon(vendor.deliveryScore);
+
           return (
-            <div className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
-              {isFiltered
-                ? `${filtered.length} of ${vendors.length} vendors`
-                : `${vendors.length} vendors`}
+            <div key={vendor.id} className="glass-card p-5 relative group" style={{ cursor: 'pointer' }} onClick={() => setExpandedId(isExpanded ? null : vendor.id)}>
+              {/* Compare checkbox */}
+              <div className={`absolute top-3 right-3 z-10 transition-opacity ${isCompareSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} onClick={e => { e.stopPropagation(); toggleCompare(vendor.id); }}>
+                <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center cursor-pointer transition-colors ${isCompareSelected ? 'border-[var(--blue)] bg-[var(--blue)]' : 'border-[var(--glass-border)] hover:border-[var(--blue)]'}`}>
+                  {isCompareSelected && <Check size={14} style={{ color: '#fff' }} />}
+                </div>
+              </div>
+
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `var(--${getRiskColor(vendor.riskLevel)})`, opacity: 0.15 }}>
+                  <Shield size={24} style={{ color: `var(--${getRiskColor(vendor.riskLevel)})` }} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-semibold text-lg" style={{ color: 'var(--text)' }}>{vendor.name}</h3>
+                    <span className={`glass-badge glass-badge-${getRiskColor(vendor.riskLevel)}`}>{vendor.riskLevel}</span>
+                    <span className={`glass-badge glass-badge-${statusColorMap[vendor.status] ?? 'gray'}`}>{vendor.status}</span>
+                  </div>
+                  <div className="flex items-center gap-3 mt-1 text-sm flex-wrap" style={{ color: 'var(--text-muted)' }}>
+                    <span className="flex items-center gap-1"><MapPin size={12} /> {vendor.location}</span>
+                    <span>{vendor.category}</span>
+                    {openPOs > 0 && <span className="flex items-center gap-1" style={{ color: 'var(--blue)' }}><Package size={12} /> {openPOs} open PO{openPOs > 1 ? 's' : ''}</span>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Score Bars */}
+              <div className="grid grid-cols-5 gap-2 mt-4">
+                <ScoreBar label="Delivery" value={vendor.deliveryScore} />
+                <ScoreBar label="Quality" value={vendor.qualityScore} />
+                <ScoreBar label="Cost" value={vendor.costScore} />
+                <ScoreBar label="Sustain" value={vendor.sustainabilityScore} />
+                <ScoreBar label="Innovate" value={vendor.innovationScore} />
+              </div>
+
+              {/* Expanded Details */}
+              {isExpanded && (
+                <div className="mt-4 pt-4 space-y-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <DetailItem label="Lead Time" value={`${vendor.leadTime} days`} />
+                    <DetailItem label="Min Order" value={`$${vendor.minOrder.toLocaleString()}`} />
+                    <DetailItem label="Payment" value={vendor.paymentTerms} />
+                    <DetailItem label="Risk Score" value={`${vendor.riskScore}/100`} color={getScoreColor(vendor.riskScore)} />
+                  </div>
+                  {vendor.certifications.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {vendor.certifications.map(cert => (
+                        <span key={cert} className="glass-badge glass-badge-blue text-[10px]">{cert}</span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2 pt-2">
+                    <button className="glass-button text-xs py-1.5 px-3 flex items-center gap-1" onClick={e => { e.stopPropagation(); openEditModal(vendor); }}><Pencil size={12} /> Edit</button>
+                    <button className="glass-button text-xs py-1.5 px-3 flex items-center gap-1" style={{ color: 'var(--red)' }} onClick={e => { e.stopPropagation(); handleDelete(vendor.id); }}><Trash2 size={12} /> Delete</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Expand indicator */}
+              <div className="flex justify-center mt-2">
+                {isExpanded ? <ChevronUp size={16} style={{ color: 'var(--text-muted)' }} /> : <ChevronDown size={16} style={{ color: 'var(--text-muted)' }} />}
+              </div>
             </div>
           );
-        })()}
+        })}
+      </div>
 
-        {/* Empty state */}
-        {filtered.length === 0 && search && (
-          <div className="glass-card p-8 text-center" style={{ color: 'var(--text-muted)' }}>
-            No vendors match &lsquo;{search}&rsquo;
-          </div>
-        )}
-
-        {/* Card grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filtered.map(v => {
-            const catColor = CATEGORY_COLORS[v.category] ?? 'blue';
-            const openCount = openPOCount(v);
-            const isCompareSelected = compareIds.has(v.id);
-            return (
-              <div
-                key={v.id}
-                className="glass-card p-5 cursor-pointer relative group"
-                onClick={() => setSelected(s => s?.id === v.id ? null : v)}
-              >
-                {/* Compare checkbox */}
-                <div
-                  className={`absolute top-3 right-3 z-10 transition-opacity ${isCompareSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-                  onClick={e => { e.stopPropagation(); toggleCompare(v.id); }}
-                >
-                  <button
-                    className={`w-6 h-6 rounded-lg border flex items-center justify-center transition-colors ${isCompareSelected ? 'glass-button-primary' : ''}`}
-                    style={{
-                      borderColor: isCompareSelected ? 'transparent' : 'var(--glass-border)',
-                      background: isCompareSelected ? undefined : 'var(--surface)',
-                      color: isCompareSelected ? '#fff' : 'var(--text-muted)',
-                    }}
-                  >
-                    {isCompareSelected ? <Check size={12} /> : null}
-                  </button>
-                </div>
-
-                {/* Avatar + Name */}
-                <div className="flex items-center gap-3 mb-3">
-                  <div
-                    className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold flex-shrink-0"
-                    style={{
-                      background: `var(--${catColor})`,
-                      opacity: 0.18,
-                      color: `var(--${catColor})`,
-                    }}
-                  >
-                    {initials(v.name)}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="font-semibold truncate" style={{ color: 'var(--text)' }}>
-                      {highlightMatch(v.name, search)}
-                    </div>
-                    <span className={`glass-badge glass-badge-${catColor} text-[10px] mt-0.5`}>
-                      {highlightMatch(v.category, search)}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Contact info */}
-                <div className="space-y-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                  <div className="flex items-center gap-2 truncate">
-                    <Mail size={12} style={{ color: 'var(--text-muted)' }} />
-                    {highlightMatch(v.contact, search)}
-                  </div>
-                  <div className="flex items-center gap-2 truncate">
-                    <Phone size={12} style={{ color: 'var(--text-muted)' }} />
-                    {v.phone || '—'}
-                  </div>
-                  <div className="flex items-center gap-2 truncate">
-                    <Clock size={12} style={{ color: 'var(--text-muted)' }} />
-                    {v.leadTime} day{v.leadTime !== 1 ? 's' : ''} lead time
-                  </div>
-                </div>
-
-                {/* Status + Open PO badge */}
-                <div className="flex items-center gap-2 mt-3 flex-wrap">
-                  <span className={`glass-badge glass-badge-${STATUS_COLORS[v.status] ?? 'blue'}`}>
-                    {v.status.replace('-', ' ')}
-                  </span>
-                  {openCount > 0 && (
-                    <span className="glass-badge glass-badge-blue">
-                      <FileText size={10} /> {openCount} open PO{openCount > 1 ? 's' : ''}
-                    </span>
-                  )}
-                </div>
-
-                {/* Action buttons */}
-                <div className="flex items-center gap-2 mt-3 pt-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
-                  <button
-                    className="glass-button text-xs py-1 px-3 flex items-center gap-1"
-                    onClick={e => { e.stopPropagation(); openEditModal(v); }}
-                  >
-                    <Pencil size={12} /> Edit
-                  </button>
-                  <button
-                    className="glass-button text-xs py-1 px-3 flex items-center gap-1"
-                    style={{ color: 'var(--red)' }}
-                    onClick={e => { e.stopPropagation(); setSelected(null); setDeleteTarget(v); }}
-                  >
-                    <Trash2 size={12} /> Delete
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+      {filtered.length === 0 && (
+        <div className="glass-card p-8 text-center" style={{ color: 'var(--text-muted)' }}>
+          No vendors found matching your filters
         </div>
-
-        {/* Compare button */}
-        {compareIds.size === 2 && (
-          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3">
-            <button
-              className="glass-button glass-button-primary flex items-center gap-2"
-              onClick={() => setShowCompare(true)}
-            >
-              Compare Vendors
-            </button>
-            <button
-              className="glass-button text-xs"
-              onClick={() => setCompareIds(new Set())}
-            >
-              Clear Selection
-            </button>
-          </div>
-        )}
-
-        {/* Compare blocked message */}
-        {compareIds.size >= 2 && (
-          <div className="text-xs text-center" style={{ color: 'var(--orange)' }}>
-            Maximum 2 vendors can be compared at once.
-          </div>
-        )}
-      </div>
-
-      {/* Detail Slide-in Panel */}
-      <div
-        className="fixed top-0 right-0 bottom-0 w-[360px] glass-panel z-30 overflow-y-auto transition-transform"
-        style={{
-          borderRadius: '28px 0 0 28px',
-          transform: selected ? 'translateX(0)' : 'translateX(100%)',
-          transitionTimingFunction: 'cubic-bezier(.22,1,.36,1)',
-          transitionDuration: '280ms',
-        }}
-      >
-        {selected && (
-          <DetailPanel
-            vendor={selected}
-            rating={ratingFor(selected.id)}
-            openPOs={openPOCount(selected)}
-            totalPOs={pos.filter(po => po.vendorId === selected.id).length}
-            lastOrder={lastOrderDate(selected.id, pos)}
-            onClose={() => setSelected(null)}
-            onEdit={() => openEditModal(selected)}
-            onDelete={() => { setSelected(null); setDeleteTarget(selected); }}
-          />
-        )}
-      </div>
-
-      {/* Backdrop for detail panel */}
-      {selected && (
-        <div
-          className="fixed inset-0 z-20"
-          style={{ background: 'rgba(0,0,0,0.15)' }}
-          onClick={() => setSelected(null)}
-        />
       )}
 
-      {/* Add/Edit Modal */}
+      {/* ─── Create/Edit Modal ─── */}
       {modalOpen && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>
-          <div className="glass-panel p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto" style={{ borderRadius: 24 }}>
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>
-                {editingVendor ? 'Edit Vendor' : 'Add Vendor'}
-              </h2>
-              <button onClick={closeModal} style={{ color: 'var(--text-muted)' }}><X size={18} /></button>
+        <Modal onClose={closeModal} title={editingVendor ? `Edit ${editingVendor.name}` : 'Add New Vendor'}>
+          <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
+            <FormField label="Vendor Name *" error={errors.name}>
+              <input className="glass-input w-full" value={formName} onChange={e => setFormName(e.target.value)} placeholder="Enter vendor name" />
+            </FormField>
+            <div className="grid grid-cols-2 gap-3">
+              <FormField label="Category *" error={errors.category}>
+                <select className="glass-input w-full" value={formCategory} onChange={e => setFormCategory(e.target.value)}>
+                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </FormField>
+              <FormField label="Status">
+                <select className="glass-input w-full" value={formStatus} onChange={e => setFormStatus(e.target.value as any)}>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                  <option value="suspended">Suspended</option>
+                </select>
+              </FormField>
             </div>
-            <div className="space-y-4">
-              {/* Company Name */}
-              <div>
-                <label className="text-xs font-semibold uppercase block mb-1" style={{ color: 'var(--text-muted)' }}>
-                  Company Name *
-                </label>
-                <input
-                  className={`glass-input w-full ${errors.name ? 'border-red-500' : ''}`}
-                  value={form.name}
-                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                  placeholder="Acme Corp"
-                />
-                {errors.name && <div className="text-xs mt-1" style={{ color: 'var(--red)' }}>{errors.name}</div>}
-              </div>
+            <FormField label="Location *" error={errors.location}>
+              <input className="glass-input w-full" value={formLocation} onChange={e => setFormLocation(e.target.value)} placeholder="City, Country" />
+            </FormField>
 
-              {/* Contact */}
-              <div>
-                <label className="text-xs font-semibold uppercase block mb-1" style={{ color: 'var(--text-muted)' }}>
-                  Contact *
-                </label>
-                <input
-                  className={`glass-input w-full ${errors.contact ? 'border-red-500' : ''}`}
-                  value={form.contact}
-                  onChange={e => setForm(f => ({ ...f, contact: e.target.value }))}
-                  placeholder="Jane Doe"
-                />
-                {errors.contact && <div className="text-xs mt-1" style={{ color: 'var(--red)' }}>{errors.contact}</div>}
-              </div>
+            {/* Score Sliders */}
+            <div className="glass-card-solid p-4 space-y-3">
+              <h4 className="text-xs font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>Performance Scores</h4>
+              <ScoreSlider label="Risk Score" value={formRiskScore} onChange={setFormRiskScore} color="red" />
+              <ScoreSlider label="Delivery" value={formDelivery} onChange={setFormDelivery} color="blue" />
+              <ScoreSlider label="Quality" value={formQuality} onChange={setFormQuality} color="green" />
+              <ScoreSlider label="Cost" value={formCost} onChange={setFormCost} color="cyan" />
+              <ScoreSlider label="Sustainability" value={formSustainability} onChange={setFormSustainability} color="green" />
+              <ScoreSlider label="Innovation" value={formInnovation} onChange={setFormInnovation} color="purple" />
+            </div>
 
-              {/* Email */}
-              <div>
-                <label className="text-xs font-semibold uppercase block mb-1" style={{ color: 'var(--text-muted)' }}>
-                  Email *
-                </label>
-                <input
-                  className={`glass-input w-full ${errors.email ? 'border-red-500' : ''}`}
-                  value={form.email}
-                  onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                  placeholder="jane@acme.com"
-                />
-                {errors.email && <div className="text-xs mt-1" style={{ color: 'var(--red)' }}>{errors.email}</div>}
-              </div>
+            <div className="grid grid-cols-2 gap-3">
+              <FormField label="Lead Time (days)">
+                <input type="number" className="glass-input w-full" value={formLeadTime} onChange={e => setFormLeadTime(parseInt(e.target.value) || 0)} />
+              </FormField>
+              <FormField label="Min Order ($)">
+                <input type="number" className="glass-input w-full" value={formMinOrder} onChange={e => setFormMinOrder(parseInt(e.target.value) || 0)} />
+              </FormField>
+            </div>
+            <FormField label="Payment Terms">
+              <select className="glass-input w-full" value={formPaymentTerms} onChange={e => setFormPaymentTerms(e.target.value)}>
+                {PAYMENT_TERMS.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </FormField>
 
-              {/* Phone */}
-              <div>
-                <label className="text-xs font-semibold uppercase block mb-1" style={{ color: 'var(--text-muted)' }}>Phone</label>
-                <input
-                  className="glass-input w-full"
-                  value={form.phone}
-                  onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
-                  placeholder="+1-555-0100"
-                />
+            {/* Certifications */}
+            <div>
+              <label className="text-xs font-semibold uppercase block mb-2" style={{ color: 'var(--text-muted)' }}>Certifications</label>
+              <div className="flex gap-2 mb-2">
+                <input className="glass-input flex-1" value={certInput} onChange={e => setCertInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCertification(); } }} placeholder="Add certification..." />
+                <button className="glass-button px-3" onClick={addCertification}><Plus size={14} /></button>
               </div>
-
-              {/* Category + Status row */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold uppercase block mb-1" style={{ color: 'var(--text-muted)' }}>Category</label>
-                  <select
-                    className="glass-input w-full"
-                    value={form.category}
-                    onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-                  >
-                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-semibold uppercase block mb-1" style={{ color: 'var(--text-muted)' }}>Status</label>
-                  <select
-                    className="glass-input w-full"
-                    value={form.status}
-                    onChange={e => setForm(f => ({ ...f, status: e.target.value as Vendor['status'] }))}
-                  >
-                    {STATUSES.map(s => <option key={s} value={s}>{s.replace('-', ' ')}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              {/* Payment Terms + Lead Time */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold uppercase block mb-1" style={{ color: 'var(--text-muted)' }}>Payment Terms</label>
-                  <select
-                    className="glass-input w-full"
-                    value={form.paymentTerms}
-                    onChange={e => setForm(f => ({ ...f, paymentTerms: e.target.value }))}
-                  >
-                    {PAYMENT_TERMS.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-semibold uppercase block mb-1" style={{ color: 'var(--text-muted)' }}>Lead Time (days)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    className="glass-input w-full"
-                    value={form.leadTime}
-                    onChange={e => setForm(f => ({ ...f, leadTime: parseInt(e.target.value, 10) || 0 }))}
-                  />
-                </div>
-              </div>
-
-              {/* Location */}
-              <div>
-                <label className="text-xs font-semibold uppercase block mb-1" style={{ color: 'var(--text-muted)' }}>Location</label>
-                <input
-                  className="glass-input w-full"
-                  value={form.location}
-                  onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
-                  placeholder="City, State"
-                />
-              </div>
-
-              {/* Notes */}
-              <div>
-                <label className="text-xs font-semibold uppercase block mb-1" style={{ color: 'var(--text-muted)' }}>Notes</label>
-                <textarea
-                  className="glass-input w-full resize-none"
-                  rows={3}
-                  maxLength={300}
-                  value={form.notes}
-                  onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-                  placeholder="Additional notes..."
-                />
-                <div className="text-xs mt-1 text-right" style={{ color: form.notes.length >= 280 ? 'var(--orange)' : 'var(--text-muted)' }}>
-                  {form.notes.length} / 300
-                </div>
+              <div className="flex flex-wrap gap-1.5">
+                {formCertifications.map(cert => (
+                  <span key={cert} className="glass-badge glass-badge-blue text-[10px] flex items-center gap-1">
+                    {cert}
+                    <button onClick={() => removeCertification(cert)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'inherit' }}><X size={10} /></button>
+                  </span>
+                ))}
               </div>
             </div>
 
-            {/* Actions */}
-            <div className="flex items-center justify-end gap-3 mt-6">
+            <div className="flex items-center justify-end gap-3 pt-2">
               <button className="glass-button" onClick={closeModal}>Cancel</button>
-              <button className="glass-button glass-button-primary" onClick={handleSave} disabled={isSaving}>
-                {isSaving ? 'Saving...' : editingVendor ? 'Save Changes' : 'Add Vendor'}
-              </button>
+              <button className="glass-button glass-button-primary" onClick={handleSave}>{editingVendor ? 'Save Changes' : 'Add Vendor'}</button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
-      {/* Delete Confirmation Modal */}
-      {deleteTarget && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>
-          <div className="glass-panel p-6 w-full max-w-sm" style={{ borderRadius: 24 }}>
-            <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text)' }}>Delete Vendor</h3>
-            <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>
-              Are you sure you want to delete <strong>{deleteTarget.name}</strong>?
-            </p>
-            {(() => {
-              const oc = openPOCount(deleteTarget);
-              if (oc > 0) {
-                return (
-                  <p className="text-sm mb-4" style={{ color: 'var(--orange)' }}>
-                    This vendor has {oc} open order{oc > 1 ? 's' : ''}.
-                  </p>
-                );
-              }
-              return null;
-            })()}
-            <div className="flex items-center justify-end gap-3">
-              <button className="glass-button" onClick={() => setDeleteTarget(null)}>Cancel</button>
-              <button
-                className="glass-button"
-                style={{ background: 'var(--red)', color: '#fff', borderColor: 'transparent' }}
-                onClick={() => handleDelete(deleteTarget)}
-                disabled={isSaving}
-              >
-                {isSaving ? 'Deleting...' : 'Delete'}
-              </button>
+      {/* ─── Compare Modal ─── */}
+      {compareOpen && (
+        <Modal onClose={() => setCompareOpen(false)} title="Vendor Comparison">
+          {compareVendors.length < 2 ? (
+            <div className="text-center py-8" style={{ color: 'var(--text-muted)' }}>Select at least 2 vendors to compare</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="glass-table">
+                <thead>
+                  <tr>
+                    <th>Metric</th>
+                    {compareVendors.map(v => <th key={v.id}>{v.name}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {['deliveryScore', 'qualityScore', 'costScore', 'sustainabilityScore', 'innovationScore', 'riskScore'].map(metric => (
+                    <tr key={metric}>
+                      <td className="font-medium" style={{ color: 'var(--text-muted)' }}>{metric.replace('Score', '')}</td>
+                      {compareVendors.map(v => {
+                        const val = (v as any)[metric];
+                        return <td key={v.id} style={{ color: getScoreColor(val), fontWeight: 600 }}>{val}</td>;
+                      })}
+                    </tr>
+                  ))}
+                  <tr>
+                    <td className="font-medium" style={{ color: 'var(--text-muted)' }}>Lead Time</td>
+                    {compareVendors.map(v => <td key={v.id} style={{ color: 'var(--text)' }}>{v.leadTime} days</td>)}
+                  </tr>
+                  <tr>
+                    <td className="font-medium" style={{ color: 'var(--text-muted)' }}>Min Order</td>
+                    {compareVendors.map(v => <td key={v.id} style={{ color: 'var(--text)' }}>${v.minOrder.toLocaleString()}</td>)}
+                  </tr>
+                  <tr>
+                    <td className="font-medium" style={{ color: 'var(--text-muted)' }}>Status</td>
+                    {compareVendors.map(v => <td key={v.id}><span className={`glass-badge glass-badge-${statusColorMap[v.status] ?? 'gray'}`}>{v.status}</span></td>)}
+                  </tr>
+                </tbody>
+              </table>
             </div>
-          </div>
-        </div>
+          )}
+        </Modal>
       )}
 
-      {/* Compare Modal */}
-      {showCompare && compareVendors.length === 2 && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>
-          <div className="glass-panel p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto" style={{ borderRadius: 24 }}>
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>Compare Vendors</h2>
-              <button onClick={() => setShowCompare(false)} style={{ color: 'var(--text-muted)' }}><X size={18} /></button>
-            </div>
-            <CompareTable vendors={compareVendors} ratings={ratings} pos={pos} />
-            <div className="flex items-center justify-end gap-3 mt-4">
-              <button
-                className="glass-button text-xs"
-                onClick={() => { setCompareIds(new Set()); setShowCompare(false); }}
-              >
-                Clear Selection
-              </button>
-              <button className="glass-button" onClick={() => setShowCompare(false)}>Close</button>
-            </div>
+      {/* ─── Delete Confirmation Modal ─── */}
+      {deleteConfirmId && (
+        <Modal title="Delete Vendor" onClose={() => setDeleteConfirmId(null)}>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 24 }}>Are you sure you want to delete <strong style={{ color: 'var(--text)' }}>{vendors.find(v => v.id === deleteConfirmId)?.name}</strong>? This action cannot be undone.</p>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="glass-button" onClick={() => setDeleteConfirmId(null)}>Cancel</button>
+            <button className="glass-button" style={{ background: 'var(--red)', color: '#fff', borderColor: 'var(--red)' }} onClick={confirmDelete}>Delete</button>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );
 }
 
-// Detail Panel
+// ─── Sub-components ───
 
-function DetailPanel({ vendor, rating, openPOs, totalPOs, lastOrder, onClose, onEdit, onDelete }: {
-  vendor: Vendor;
-  rating?: VendorRating;
-  openPOs: number;
-  totalPOs: number;
-  lastOrder: string;
-  onClose: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
-  const catColor = CATEGORY_COLORS[vendor.category] ?? 'blue';
+function StatCard({ label, value, color, suffix = '' }: { label: string; value: number; color: string; suffix?: string }) {
   return (
-    <div className="p-6 space-y-5">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>{vendor.name}</h2>
-        <button onClick={onClose} style={{ color: 'var(--text-muted)' }}><X size={18} /></button>
+    <div className="glass-card p-4">
+      <div className="text-xs font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>{label}</div>
+      <div className="text-2xl font-bold mt-1" style={{ color: `var(--${color})` }}>{value}{suffix}</div>
+    </div>
+  );
+}
+
+function ScoreBar({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] font-medium uppercase" style={{ color: 'var(--text-muted)' }}>{label}</span>
+        <span className="text-[10px] font-bold" style={{ color: getScoreColor(value) }}>{value}</span>
       </div>
-
-      <div className="flex items-center gap-2">
-        <span className={`glass-badge glass-badge-${catColor}`}>{vendor.category}</span>
-        <span className={`glass-badge glass-badge-${STATUS_COLORS[vendor.status] ?? 'blue'}`}>
-          {vendor.status.replace('-', ' ')}
-        </span>
-        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{vendor.vendorCode}</span>
-      </div>
-
-      <div className="space-y-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-        <div className="flex items-center gap-2"><Mail size={14} style={{ color: 'var(--text-muted)' }} /> {vendor.contact}</div>
-        <div className="flex items-center gap-2"><Mail size={14} style={{ color: 'var(--text-muted)' }} /> {vendor.email}</div>
-        <div className="flex items-center gap-2"><Phone size={14} style={{ color: 'var(--text-muted)' }} /> {vendor.phone || '—'}</div>
-        <div className="flex items-center gap-2"><Clock size={14} style={{ color: 'var(--text-muted)' }} /> {vendor.leadTime} day{vendor.leadTime !== 1 ? 's' : ''} lead time</div>
-      </div>
-
-      <div className="glass-card p-4 space-y-2 text-sm">
-        <div className="flex justify-between">
-          <span style={{ color: 'var(--text-muted)' }}>Payment Terms</span>
-          <span style={{ color: 'var(--text)' }}>{vendor.paymentTerms}</span>
-        </div>
-        <div className="flex justify-between">
-          <span style={{ color: 'var(--text-muted)' }}>Location</span>
-          <span style={{ color: 'var(--text)' }}>{vendor.location || '—'}</span>
-        </div>
-        <div className="flex justify-between">
-          <span style={{ color: 'var(--text-muted)' }}>Contract End</span>
-          <span style={{ color: 'var(--text)' }}>{vendor.contractEnd || '—'}</span>
-        </div>
-        <div className="flex justify-between">
-          <span style={{ color: 'var(--text-muted)' }}>Total POs</span>
-          <span style={{ color: 'var(--text)' }}>{totalPOs || 'No orders yet'}</span>
-        </div>
-        <div className="flex justify-between">
-          <span style={{ color: 'var(--text-muted)' }}>Open POs</span>
-          <span style={{ color: openPOs > 0 ? 'var(--blue)' : 'var(--text)' }}>{openPOs}</span>
-        </div>
-        <div className="flex justify-between">
-          <span style={{ color: 'var(--text-muted)' }}>Avg Rating</span>
-          <span style={{ color: 'var(--text)' }}>
-            {rating ? (
-              <span className="flex items-center gap-1">
-                <Star size={12} style={{ color: 'var(--orange)' }} fill="var(--orange)" /> {rating.overall.toFixed(1)} / 5.0
-              </span>
-            ) : 'Not rated yet'}
-          </span>
-        </div>
-        <div className="flex justify-between">
-          <span style={{ color: 'var(--text-muted)' }}>Last Order</span>
-          <span style={{ color: 'var(--text)' }}>{lastOrder || 'No orders yet'}</span>
-        </div>
-      </div>
-
-      {vendor.notes && (
-        <div className="glass-card p-4">
-          <h4 className="text-xs font-semibold uppercase mb-2" style={{ color: 'var(--text-muted)' }}>Notes</h4>
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{vendor.notes}</p>
-        </div>
-      )}
-
-      <div className="flex items-center gap-3 pt-2">
-        <button className="glass-button flex items-center gap-2 text-xs" onClick={onEdit}>
-          <Pencil size={12} /> Edit
-        </button>
-        <button
-          className="glass-button flex items-center gap-2 text-xs"
-          style={{ color: 'var(--red)' }}
-          onClick={onDelete}
-        >
-          <Trash2 size={12} /> Delete
-        </button>
+      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--surface-strong)' }}>
+        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${value}%`, background: getScoreColor(value) }} />
       </div>
     </div>
   );
 }
 
-// Compare Table
-
-function CompareTable({ vendors, ratings, pos }: { vendors: Vendor[]; ratings: VendorRating[]; pos: PurchaseOrder[] }) {
-  const [v1, v2] = vendors;
-  const r1 = ratings.find(r => r.vendorId === v1.id);
-  const r2 = ratings.find(r => r.vendorId === v2.id);
-
-  const rows: { label: string; a: string | number; b: string | number; lower?: boolean }[] = [
-    { label: 'Lead Time', a: `${v1.leadTime}d`, b: `${v2.leadTime}d`, lower: true },
-    { label: 'Payment Terms', a: v1.paymentTerms, b: v2.paymentTerms },
-    { label: 'Avg Score', a: r1 ? r1.overall.toFixed(1) : 'N/A', b: r2 ? r2.overall.toFixed(1) : 'N/A' },
-    { label: 'Open POs', a: countOpenPOs(v1, pos), b: countOpenPOs(v2, pos), lower: true },
-  ];
-
-  function cellColor(a: string | number, b: string | number, lower?: boolean): string {
-    const na = typeof a === 'number' ? a : parseFloat(String(a));
-    const nb = typeof b === 'number' ? b : parseFloat(String(b));
-    if (isNaN(na) || isNaN(nb)) return 'var(--text)';
-    if (na === nb) return 'var(--text)';
-    const aBetter = lower ? na < nb : na > nb;
-    return aBetter ? 'var(--green)' : 'var(--red)';
-  }
-
+function DetailItem({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="glass-table">
-        <thead>
-          <tr>
-            <th />
-            <th style={{ color: 'var(--text)' }}>{v1.name}</th>
-            <th style={{ color: 'var(--text)' }}>{v2.name}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(r => (
-            <tr key={r.label}>
-              <td className="font-semibold" style={{ color: 'var(--text-muted)' }}>{r.label}</td>
-              <td style={{ color: cellColor(r.a, r.b, r.lower) }}>{r.a}</td>
-              <td style={{ color: cellColor(r.b, r.a, r.lower) }}>{r.b}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div>
+      <div className="text-[10px] font-medium uppercase" style={{ color: 'var(--text-muted)' }}>{label}</div>
+      <div className="text-sm font-semibold" style={{ color: color ?? 'var(--text)' }}>{value}</div>
+    </div>
+  );
+}
+
+function ScoreSlider({ label, value, onChange, color }: { label: string; value: number; onChange: (v: number) => void; color: string }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{label}</span>
+        <span className="text-xs font-bold" style={{ color: `var(--${color})` }}>{value}</span>
+      </div>
+      <input type="range" min={0} max={100} value={value} onChange={e => onChange(parseInt(e.target.value))}
+        className="w-full" style={{ accentColor: `var(--${color})` }} />
+    </div>
+  );
+}
+
+function FormField({ label, children, error }: { label: string; children: React.ReactNode; error?: string }) {
+  return (
+    <div>
+      <label className="text-xs font-semibold uppercase block mb-1" style={{ color: 'var(--text-muted)' }}>{label}</label>
+      {children}
+      {error && <div className="text-xs mt-1" style={{ color: 'var(--red)' }}>{error}</div>}
+    </div>
+  );
+}
+
+function Modal({ children, onClose, title }: { children: React.ReactNode; onClose: () => void; title?: string }) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="glass-panel p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto" style={{ borderRadius: 24 }}>
+        {title && <div className="flex items-center justify-between mb-4"><h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>{title}</h2><button onClick={onClose} style={{ color: 'var(--text-muted)' }}><X size={18} /></button></div>}
+        {children}
+      </div>
     </div>
   );
 }

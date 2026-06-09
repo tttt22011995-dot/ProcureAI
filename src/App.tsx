@@ -7,7 +7,8 @@ import PurchaseOrders from './pages/PurchaseOrders';
 import Delivery from './pages/Delivery';
 import Scorecard from './pages/Scorecard';
 import AIRisk from './pages/AIRisk';
-import { loadInitialData, type Page } from './lib/data';
+import CatalogItems from './pages/CatalogItems';
+import { seedData, type Page } from './lib/data';
 import { PageErrorBoundary } from './components/ErrorBoundary';
 import { RefreshProvider } from './lib/RefreshContext';
 import { ToastProvider } from './lib/ToastContext';
@@ -19,7 +20,7 @@ function AppContent() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
-    loadInitialData().finally(() => setIsLoading(false));
+    seedData().finally(() => setIsLoading(false));
   }, []);
 
   useEffect(() => {
@@ -47,6 +48,7 @@ function AppContent() {
       case 'delivery': return <PageErrorBoundary><Delivery /></PageErrorBoundary>;
       case 'scorecard': return <PageErrorBoundary><Scorecard /></PageErrorBoundary>;
       case 'ai-risk': return <PageErrorBoundary><AIRisk /></PageErrorBoundary>;
+      case 'catalog': return <PageErrorBoundary><CatalogItems /></PageErrorBoundary>;
     }
   };
 

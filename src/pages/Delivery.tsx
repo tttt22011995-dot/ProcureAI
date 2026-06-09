@@ -114,7 +114,7 @@ function getTodayStr(): string {
 // ─── Main Component ───
 
 export default function Delivery() {
-  const { refreshKey } = useRefresh();
+  const { refreshKey, triggerRefresh } = useRefresh();
   const { showToast } = useToast();
   const [pos, setPosState] = useState<PurchaseOrder[]>([]);
   const [deliveryPerf, setDeliveryPerfState] = useState<DeliveryPerformance[]>([]);
@@ -134,14 +134,21 @@ export default function Delivery() {
   const [newNoteText, setNewNoteText] = useState<Record<string, string>>({});
 
   useEffect(() => {
+    let cancelled = false;
     setIsLoading(true);
     Promise.all([fetchPurchaseOrders(), fetchDeliveryPerformance()])
       .then(([orders, perf]) => {
+        if (cancelled) return;
         setPosState(orders);
         setDeliveryPerfState(perf);
+        setIsLoading(false);
       })
-      .finally(() => setIsLoading(false));
-  }, [refreshKey]);
+      .catch(() => {
+        if (cancelled) return;
+        setIsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [<think>Key]);
 
   // ─── Vendor options from POs ───
 
@@ -190,7 +197,6 @@ export default function Delivery() {
       return matchPO && matchVendor && matchFilter;
     });
 
-    // Sort
     switch (sortBy) {
       case 'earliest':
         result.sort((a, b) => new Date(a.deliveryDate).getTime() - new Date(b.deliveryDate).getTime());
@@ -275,7 +281,8 @@ export default function Delivery() {
     const success = await upsertPurchaseOrder(updated);
     if (!success) return;
 
-    setPosState(prev => prev.map(p => p.id === po.id ? updated : p));
+    const nextPos = pos.map(p => p.id === po.id ? updated : p);
+    setPosState(nextPos);
 
     if ((nextStatus === 'delivered' || nextStatus === 'invoiced') && actualDeliveryDate) {
       const expected = new Date(po.deliveryDate);
@@ -296,12 +303,12 @@ export default function Delivery() {
         daysDifference: daysDiff,
       };
       await upsertDeliveryPerformance(newPerf);
-      setDeliveryPerfState(prev => {
-        const filtered = prev.filter(dp => dp.poId !== po.id);
-        return [...filtered, newPerf];
-      });
+      const nextPerf = deliveryPerf.filter(dp => dp.poId !== po.id).concat(newPerf);
+      setDeliveryPerfState(nextPerf);
     }
-  }, []);
+
+    triggerRefresh();
+  }, [pos, deliveryPerf, triggerRefresh]);
 
   const handleRevertStatus = useCallback(async (po: PurchaseOrder) => {
     const currentStatus = po.deliveryStatus || 'ordered';
@@ -319,8 +326,10 @@ export default function Delivery() {
     const success = await upsertPurchaseOrder(updated);
     if (!success) return;
 
-    setPosState(prev => prev.map(p => p.id === po.id ? updated : p));
-  }, []);
+    const next = pos.map(p => p.id === po.id ? updated : p);
+    setPosState(next);
+    triggerRefresh();
+  }, [pos, triggerRefresh]);
 
   // ─── Notes Handlers ───
 
@@ -356,10 +365,12 @@ export default function Delivery() {
       return;
     }
 
-    setPosState(prev => prev.map(p => p.id === po.id ? updated : p));
+    const next = pos.map(p => p.id === po.id ? updated : p);
+    setPosState(next);
     setNewNoteText(prev => ({ ...prev, [po.id]: '' }));
     showToast('Note saved', 'success');
-  }, [newNoteText, showToast]);
+    triggerRefresh();
+  }, [newNoteText, pos, showToast, triggerRefresh]);
 
   const handleDeleteNote = useCallback(async (po: PurchaseOrder, idx: number) => {
     const updated = {
@@ -368,12 +379,14 @@ export default function Delivery() {
     };
     const success = await upsertPurchaseOrder(updated);
     if (success) {
-      setPosState(prev => prev.map(p => p.id === po.id ? updated : p));
+      const next = pos.map(p => p.id === po.id ? updated : p);
+      setPosState(next);
       showToast('Note deleted', 'info');
+      triggerRefresh();
     } else {
       showToast('Failed to save', 'error');
     }
-  }, [showToast]);
+  }, [pos, showToast, triggerRefresh]);
 
   // ─── On-time Badge ───
 
@@ -384,7 +397,6 @@ export default function Delivery() {
     const actualDate = po.actualDeliveryDate;
     if (!actualDate) return null;
 
-    // Look up deliveryPerformance entry
     const perf = deliveryPerf.find(dp => dp.poId === po.id);
     if (perf && perf.onTime !== undefined && perf.daysDifference !== undefined) {
       const days = Math.abs(perf.daysDifference);
@@ -399,7 +411,6 @@ export default function Delivery() {
       }
     }
 
-    // Fallback: compute from dates
     const expected = new Date(po.deliveryDate);
     const actual = new Date(actualDate);
     const daysDiff = daysBetween(actual, expected);
