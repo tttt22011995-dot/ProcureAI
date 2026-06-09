@@ -477,7 +477,12 @@ export async function deleteCatalogItem(id: string): Promise<boolean> {
 // ─── Seed data (called once on app mount if vendors table empty) ───
 
 export async function seedData(): Promise<void> {
-  const { data: existing } = await supabase.from('vendors').select('id').limit(1);
+  try {
+  const { data: existing, error: checkError } = await supabase.from('vendors').select('id').limit(1);
+  if (checkError) {
+    console.warn('seedData: cannot reach vendors table, skipping seed:', checkError.message);
+    return;
+  }
   if (existing && existing.length > 0) return;
 
   // Seed vendors
@@ -569,6 +574,9 @@ export async function seedData(): Promise<void> {
 
   for (const p of perfs) {
     await upsertDeliveryPerformance(p);
+  }
+  } catch (err) {
+    console.error('seedData failed, app will load with empty data:', err);
   }
 }
 
