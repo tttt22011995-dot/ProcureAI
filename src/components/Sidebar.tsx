@@ -61,7 +61,7 @@ export default function Sidebar({ active, onNavigate, isDark, onToggleTheme, isM
   // Refresh alerts when data changes
   useEffect(() => {
     // computeAlerts reads from cache, which is updated on refresh
-  }, [<think>Key]);
+  }, [refreshKey]);
 
   useEffect(() => {
     if (!dropdownOpen) return;
