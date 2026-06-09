@@ -53,14 +53,21 @@ const alertColor: Record<string, string> = {
 export default function Sidebar({ active, onNavigate, isDark, onToggleTheme, isMobileOpen, onClose }: SidebarProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number } | null>(null);
-  const { refreshKey } = useRefresh();
-  const alerts = computeAlerts();
   const bellRef = useRef<HTMLButtonElement>(null);
   const portalRef = useRef<HTMLDivElement>(null);
+  const { refreshKey } = useRefresh();
+  const [alerts, setAlerts] = useState<ReturnType<typeof computeAlerts>>([]);
 
-  // Refresh alerts when data changes
+  // Recompute alerts whenever refreshKey changes or on mount
   useEffect(() => {
-    // computeAlerts reads from cache, which is updated on refresh
+    setAlerts(computeAlerts());
+  }, [refreshKey]);
+
+  // Also recompute after a short delay to catch data loaded after mount
+  useEffect(() => {
+    const t1 = setTimeout(() => setAlerts(computeAlerts()), 1500);
+    const t2 = setTimeout(() => setAlerts(computeAlerts()), 4000);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [refreshKey]);
 
   useEffect(() => {
@@ -70,13 +77,20 @@ export default function Sidebar({ active, onNavigate, isDark, onToggleTheme, isM
           !portalRef.current?.contains(e.target as Node))
         setDropdownOpen(false);
     };
-    const dismiss = () => setDropdownOpen(false);
+    const dismiss = (e: Event) => {
+      // Don't close if scrolling inside the portal dropdown
+      const path = e.composedPath ? e.composedPath() : [];
+      if (portalRef.current && path.includes(portalRef.current)) return;
+      if (portalRef.current?.contains(e.target as Node)) return;
+      setDropdownOpen(false);
+    };
+    const onResize = () => setDropdownOpen(false);
     document.addEventListener('mousedown', close);
-    window.addEventListener('resize', dismiss);
+    window.addEventListener('resize', onResize);
     window.addEventListener('scroll', dismiss, true);
     return () => {
       document.removeEventListener('mousedown', close);
-      window.removeEventListener('resize', dismiss);
+      window.removeEventListener('resize', onResize);
       window.removeEventListener('scroll', dismiss, true);
     };
   }, [dropdownOpen]);
