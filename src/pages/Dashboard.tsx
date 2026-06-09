@@ -372,7 +372,7 @@ export default function Dashboard() {
             Showing available data only ({availableMonths} of {requestedMonths} months)
           </div>
         )}
-        <div style={{ height: 300 }}>
+        <div style={{ height: 340 }}>
           {chartError ? (
             <FallbackTable buckets={buckets} />
           ) : (
