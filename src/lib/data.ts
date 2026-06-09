@@ -2,6 +2,7 @@
 
 export interface Vendor {
   id: string;
+  vendorCode: string;
   name: string;
   category: string;
   location: string;
@@ -10,6 +11,11 @@ export interface Vendor {
   contractEnd: string;
   email: string;
   spend: number;
+  contact: string;
+  phone: string;
+  paymentTerms: string;
+  leadTime: number;
+  notes: string;
 }
 
 export interface LineItem {
@@ -84,6 +90,15 @@ export function getVendorById(id: string): Vendor | undefined {
   return getVendors().find(v => v.id === id);
 }
 
+export function nextVendorCode(): string {
+  const vendors = getVendors();
+  const maxNum = vendors.reduce((max, v) => {
+    const m = v.vendorCode.match(/VND-(\d+)/);
+    return m ? Math.max(max, parseInt(m[1], 10)) : max;
+  }, 0);
+  return `VND-${String(maxNum + 1).padStart(3, '0')}`;
+}
+
 export function getPOsByVendor(vendorId: string): PurchaseOrder[] {
   return getPurchaseOrders().filter(po => po.vendorId === vendorId);
 }
@@ -97,6 +112,7 @@ export function getVendorRating(vendorId: string): VendorRating | undefined {
 const sampleVendors: Vendor[] = [
   {
     id: 'v1',
+    vendorCode: 'VND-001',
     name: 'Apex Materials Inc.',
     category: 'Raw Materials',
     location: 'Houston, TX',
@@ -105,9 +121,15 @@ const sampleVendors: Vendor[] = [
     contractEnd: '2026-12-31',
     email: 'contact@apexmaterials.com',
     spend: 2450000,
+    contact: 'James Morgan',
+    phone: '+1-713-555-0101',
+    paymentTerms: 'Net 30',
+    leadTime: 14,
+    notes: 'Preferred supplier for steel and aluminum. Consistent quality ratings above 4.5.',
   },
   {
     id: 'v2',
+    vendorCode: 'VND-002',
     name: 'NovaTech Components',
     category: 'Electronics',
     location: 'San Jose, CA',
@@ -116,9 +138,15 @@ const sampleVendors: Vendor[] = [
     contractEnd: '2026-09-30',
     email: 'orders@novatech.io',
     spend: 1870000,
+    contact: 'Lisa Chen',
+    phone: '+1-408-555-0202',
+    paymentTerms: 'Net 60',
+    leadTime: 21,
+    notes: 'Key PCB and semiconductor supplier. Lead times can vary seasonally.',
   },
   {
     id: 'v3',
+    vendorCode: 'VND-003',
     name: 'GreenLine Logistics',
     category: 'Logistics',
     location: 'Chicago, IL',
@@ -127,9 +155,15 @@ const sampleVendors: Vendor[] = [
     contractEnd: '2026-06-30',
     email: 'ops@greenlinelog.com',
     spend: 960000,
+    contact: 'Mark Thompson',
+    phone: '+1-312-555-0303',
+    paymentTerms: 'Net 30',
+    leadTime: 3,
+    notes: 'Under review due to recent delivery delays. On-time rate dropped below 70%.',
   },
   {
     id: 'v4',
+    vendorCode: 'VND-004',
     name: 'Pinnacle Packaging',
     category: 'Packaging',
     location: 'Atlanta, GA',
@@ -138,17 +172,28 @@ const sampleVendors: Vendor[] = [
     contractEnd: '2027-03-31',
     email: 'sales@pinnaclepkg.com',
     spend: 720000,
+    contact: 'Sarah Williams',
+    phone: '+1-404-555-0404',
+    paymentTerms: 'Net 30',
+    leadTime: 7,
+    notes: 'Top-rated vendor. Consistently exceeds quality and delivery expectations.',
   },
   {
     id: 'v5',
+    vendorCode: 'VND-005',
     name: 'Sterling Fasteners',
-    category: 'Hardware',
+    category: 'Raw Materials',
     location: 'Detroit, MI',
     rating: 3.4,
     status: 'inactive',
     contractEnd: '2025-12-31',
     email: 'info@sterlingfast.com',
     spend: 410000,
+    contact: 'Robert Kim',
+    phone: '+1-313-555-0505',
+    paymentTerms: 'Net 90',
+    leadTime: 28,
+    notes: 'Contract expired. Inactive status. Consider re-evaluation if hardware needs arise.',
   },
 ];
 
