@@ -86,7 +86,7 @@ function AppContent() {
         onToggleTheme={toggleTheme}
         isMobileOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
-        onOpenTour={() => setTourRunning(true)}
+        onOpenTour={() => { setSidebarOpen(false); setTourRunning(true); }}
       />
       <main className="md:ml-[220px] ml-0 pt-16 md:pt-0 p-4 md:p-6 lg:p-8 min-h-screen">
         <div className="max-w-7xl mx-auto">
