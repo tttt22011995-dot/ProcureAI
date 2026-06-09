@@ -410,12 +410,13 @@ export default function PurchaseOrders() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div data-tour="po-header" className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold" style={{ color: 'var(--text)' }}>Purchase Orders</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Track and manage procurement orders</p>
         </div>
         <button
+          data-tour="create-po-btn"
           className="glass-button glass-button-primary flex items-center gap-2"
           onClick={openCreateModal}
           disabled={vendors.length === 0}
@@ -455,7 +456,7 @@ export default function PurchaseOrders() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3 items-center">
+      <div data-tour="po-status-filter" className="flex flex-wrap gap-3 items-center">
         <div className="relative flex-1 min-w-[200px]">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
           <input
@@ -516,7 +517,7 @@ export default function PurchaseOrders() {
       )}
 
       {/* PO Table */}
-      <div className="glass-card-solid overflow-hidden">
+      <div data-tour="po-list" className="glass-card-solid overflow-hidden">
         <div className="overflow-x-auto">
           <table className="glass-table">
             <thead>
