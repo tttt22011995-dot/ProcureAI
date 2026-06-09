@@ -176,12 +176,20 @@ const TOOLTIP_HEIGHT_ESTIMATE = 280;
 const GAP = 16;
 const VIEWPORT_MARGIN = 12;
 
+function getTooltipWidth() {
+  // On narrow mobile screens, use viewport width minus margins
+  const vw = window.innerWidth;
+  if (vw < 420) return vw - VIEWPORT_MARGIN * 2;
+  return TOOLTIP_WIDTH;
+}
+
 function positionTooltip(
   rect: HighlightRect,
   position: TourStep['position'],
 ): { top: number; left: number } {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
+  const tooltipW = getTooltipWidth();
 
   const sides: NonNullable<TourStep['position']>[] = ['bottom', 'top', 'right', 'left'];
   const preferred = position ?? 'bottom';
@@ -193,21 +201,21 @@ function positionTooltip(
 
     if (side === 'bottom') {
       top = rect.top + rect.height + GAP;
-      left = rect.left + rect.width / 2 - TOOLTIP_WIDTH / 2;
+      left = rect.left + rect.width / 2 - tooltipW / 2;
     } else if (side === 'top') {
       top = rect.top - TOOLTIP_HEIGHT_ESTIMATE - GAP;
-      left = rect.left + rect.width / 2 - TOOLTIP_WIDTH / 2;
+      left = rect.left + rect.width / 2 - tooltipW / 2;
     } else if (side === 'right') {
       top = rect.top + rect.height / 2 - TOOLTIP_HEIGHT_ESTIMATE / 2;
       left = rect.left + rect.width + GAP;
     } else {
       top = rect.top + rect.height / 2 - TOOLTIP_HEIGHT_ESTIMATE / 2;
-      left = rect.left - TOOLTIP_WIDTH - GAP;
+      left = rect.left - tooltipW - GAP;
     }
 
     // Check if it fits in viewport
     const fitsH = top >= VIEWPORT_MARGIN && top + TOOLTIP_HEIGHT_ESTIMATE <= vh - VIEWPORT_MARGIN;
-    const fitsW = left >= VIEWPORT_MARGIN && left + TOOLTIP_WIDTH <= vw - VIEWPORT_MARGIN;
+    const fitsW = left >= VIEWPORT_MARGIN && left + tooltipW <= vw - VIEWPORT_MARGIN;
 
     if (fitsH && fitsW) {
       return { top, left };
@@ -216,9 +224,9 @@ function positionTooltip(
 
   // Fallback: just clamp to viewport
   let top = rect.top + rect.height + GAP;
-  let left = rect.left + rect.width / 2 - TOOLTIP_WIDTH / 2;
+  let left = rect.left + rect.width / 2 - tooltipW / 2;
   top = Math.max(VIEWPORT_MARGIN, Math.min(top, vh - TOOLTIP_HEIGHT_ESTIMATE - VIEWPORT_MARGIN));
-  left = Math.max(VIEWPORT_MARGIN, Math.min(left, vw - TOOLTIP_WIDTH - VIEWPORT_MARGIN));
+  left = Math.max(VIEWPORT_MARGIN, Math.min(left, vw - tooltipW - VIEWPORT_MARGIN));
   return { top, left };
 }
 
@@ -244,7 +252,8 @@ export default function GuidedTour({ isRunning, currentPage, onNavigate, onClose
       return;
     }
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    // Short delay to let scroll settle
+    // Let scroll and any layout reflow settle before measuring
+    // 80ms is not enough for elements far down the page — use 200ms
     setTimeout(() => {
       const r = el.getBoundingClientRect();
       setHighlightRect({
@@ -253,7 +262,19 @@ export default function GuidedTour({ isRunning, currentPage, onNavigate, onClose
         width: r.width + 16,
         height: r.height + 16,
       });
-    }, 80);
+    }, 200);
+    // Re-measure once more in case layout settled later (e.g. dynamic content)
+    setTimeout(() => {
+      const el2 = document.querySelector<HTMLElement>(`[data-tour="${step.target}"]`);
+      if (!el2) return;
+      const r = el2.getBoundingClientRect();
+      setHighlightRect({
+        top: r.top - 8,
+        left: r.left - 8,
+        width: r.width + 16,
+        height: r.height + 16,
+      });
+    }, 450);
   }, [step]);
 
   // ── On tour start ─────────────────────────────────────────────────────────
@@ -292,13 +313,13 @@ export default function GuidedTour({ isRunning, currentPage, onNavigate, onClose
       const t = setTimeout(() => {
         recalcHighlight();
         setTooltipVisible(true);
-      }, 400);
+      }, 550);
       return () => clearTimeout(t);
     } else {
       const t = setTimeout(() => {
         recalcHighlight();
         setTooltipVisible(true);
-      }, 120);
+      }, 150);
       return () => clearTimeout(t);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -308,7 +329,7 @@ export default function GuidedTour({ isRunning, currentPage, onNavigate, onClose
 
   useEffect(() => {
     if (!isRunning) return;
-    const t = setTimeout(() => recalcHighlight(), 350);
+    const t = setTimeout(() => recalcHighlight(), 500);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage]);
@@ -381,17 +402,18 @@ export default function GuidedTour({ isRunning, currentPage, onNavigate, onClose
   // ── Compute tooltip position ──────────────────────────────────────────────
 
   const hasHighlight = highlightRect !== null;
+  const tooltipW = getTooltipWidth();
   const tooltipPos = hasHighlight
     ? positionTooltip(highlightRect, step.position)
     : {
         top: window.innerHeight / 2 - TOOLTIP_HEIGHT_ESTIMATE / 2,
-        left: window.innerWidth / 2 - TOOLTIP_WIDTH / 2,
+        left: window.innerWidth / 2 - tooltipW / 2,
       };
 
   // Clamp tooltip to viewport
   const clampedLeft = Math.max(
     VIEWPORT_MARGIN,
-    Math.min(tooltipPos.left, window.innerWidth - TOOLTIP_WIDTH - VIEWPORT_MARGIN),
+    Math.min(tooltipPos.left, window.innerWidth - tooltipW - VIEWPORT_MARGIN),
   );
   const clampedTop = Math.max(VIEWPORT_MARGIN, tooltipPos.top);
 
@@ -464,8 +486,8 @@ export default function GuidedTour({ isRunning, currentPage, onNavigate, onClose
           position: 'fixed',
           top: clampedTop,
           left: clampedLeft,
-          width: TOOLTIP_WIDTH,
-          padding: 24,
+          width: tooltipW,
+          padding: window.innerWidth < 420 ? 16 : 24,
           borderRadius: 20,
           zIndex: 8002,
           opacity: tooltipVisible ? 1 : 0,
@@ -510,7 +532,7 @@ export default function GuidedTour({ isRunning, currentPage, onNavigate, onClose
         {/* Title */}
         <div
           style={{
-            fontSize: 18,
+            fontSize: window.innerWidth < 420 ? 15 : 18,
             fontWeight: 700,
             color: 'var(--text)',
             marginBottom: 10,
@@ -523,7 +545,7 @@ export default function GuidedTour({ isRunning, currentPage, onNavigate, onClose
         {/* Body */}
         <div
           style={{
-            fontSize: 14,
+            fontSize: window.innerWidth < 420 ? 12 : 14,
             color: 'var(--text-secondary)',
             lineHeight: 1.6,
             marginBottom: 20,
