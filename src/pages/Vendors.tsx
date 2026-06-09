@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   Search, MapPin, Package, Star, TrendingUp, TrendingDown, Minus,
   Shield, AlertTriangle, ChevronDown, ChevronUp, Plus, Pencil,
-  Trash2, X, Check, Copy,
+  Trash2, X, Check, Copy, Phone, User, FileText,
 } from 'lucide-react';
 import {
   fetchVendors,
@@ -87,6 +87,9 @@ export default function Vendors() {
   const [formPaymentTerms, setFormPaymentTerms] = useState('Net 30');
   const [formCertifications, setFormCertifications] = useState<string[]>([]);
   const [certInput, setCertInput] = useState('');
+  const [formContact, setFormContact] = useState('');
+  const [formPhone, setFormPhone] = useState('');
+  const [formNotes, setFormNotes] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // Compare
@@ -164,6 +167,9 @@ export default function Vendors() {
     setFormPaymentTerms('Net 30');
     setFormCertifications([]);
     setCertInput('');
+    setFormContact('');
+    setFormPhone('');
+    setFormNotes('');
     setErrors({});
     setModalOpen(true);
   }, []);
@@ -185,6 +191,9 @@ export default function Vendors() {
     setFormPaymentTerms(vendor.paymentTerms);
     setFormCertifications([...vendor.certifications]);
     setCertInput('');
+    setFormContact(vendor.contact ?? '');
+    setFormPhone(vendor.phone ?? '');
+    setFormNotes(vendor.notes ?? '');
     setErrors({});
     setModalOpen(true);
   }, []);
@@ -227,6 +236,9 @@ export default function Vendors() {
       minOrder: formMinOrder,
       paymentTerms: formPaymentTerms,
       certifications: formCertifications,
+      contact: formContact.trim() || null,
+      phone: formPhone.trim() || null,
+      notes: formNotes.trim() || null,
     };
     const success = await upsertVendor(vendor);
     if (!success) return;
@@ -238,7 +250,7 @@ export default function Vendors() {
     }
     triggerRefresh();
     closeModal();
-  }, [validateForm, editingVendor, vendors, formName, formCategory, formLocation, formStatus, formRiskScore, formDelivery, formQuality, formCost, formSustainability, formInnovation, formLeadTime, formMinOrder, formPaymentTerms, formCertifications, triggerRefresh, closeModal]);
+  }, [validateForm, editingVendor, vendors, formName, formCategory, formLocation, formStatus, formRiskScore, formDelivery, formQuality, formCost, formSustainability, formInnovation, formLeadTime, formMinOrder, formPaymentTerms, formCertifications, formContact, formPhone, formNotes, triggerRefresh, closeModal]);
 
   // ─── Delete Vendor ───
 
@@ -417,6 +429,28 @@ export default function Vendors() {
                       ))}
                     </div>
                   )}
+                  {(vendor.contact || vendor.phone || vendor.notes) && (
+                    <div className="grid grid-cols-1 gap-2 pt-1">
+                      {vendor.contact && (
+                        <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                          <User size={12} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                          <span>{vendor.contact}</span>
+                        </div>
+                      )}
+                      {vendor.phone && (
+                        <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                          <Phone size={12} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                          <span>{vendor.phone}</span>
+                        </div>
+                      )}
+                      {vendor.notes && (
+                        <div className="flex items-start gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                          <FileText size={12} style={{ color: 'var(--text-muted)', flexShrink: 0, marginTop: 2 }} />
+                          <span style={{ whiteSpace: 'pre-wrap' }}>{vendor.notes}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div className="flex items-center gap-2 pt-2">
                     <button className="glass-button text-xs py-1.5 px-3 flex items-center gap-1" onClick={e => { e.stopPropagation(); openEditModal(vendor); }}><Pencil size={12} /> Edit</button>
                     <button className="glass-button text-xs py-1.5 px-3 flex items-center gap-1" style={{ color: 'var(--red)' }} onClick={e => { e.stopPropagation(); handleDelete(vendor.id); }}><Trash2 size={12} /> Delete</button>
@@ -504,6 +538,29 @@ export default function Vendors() {
                   </span>
                 ))}
               </div>
+            </div>
+
+            {/* Contact Info */}
+            <div className="glass-card-solid p-4 space-y-3">
+              <h4 className="text-xs font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>Contact Information</h4>
+              <FormField label="Contact Person">
+                <div className="relative">
+                  <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+                  <input className="glass-input w-full pl-9" value={formContact} onChange={e => setFormContact(e.target.value)} placeholder="Full name" />
+                </div>
+              </FormField>
+              <FormField label="Phone">
+                <div className="relative">
+                  <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+                  <input className="glass-input w-full pl-9" value={formPhone} onChange={e => setFormPhone(e.target.value)} placeholder="+1 (555) 000-0000" />
+                </div>
+              </FormField>
+              <FormField label="Notes">
+                <div className="relative">
+                  <FileText size={14} className="absolute left-3 top-3" style={{ color: 'var(--text-muted)' }} />
+                  <textarea className="glass-input w-full pl-9 resize-none" rows={3} value={formNotes} onChange={e => setFormNotes(e.target.value)} placeholder="Internal notes about this vendor..." />
+                </div>
+              </FormField>
             </div>
 
             <div className="flex items-center justify-end gap-3 pt-2">
