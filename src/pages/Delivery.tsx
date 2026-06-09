@@ -591,9 +591,9 @@ export default function Delivery() {
 
       {/* Timeline Chart */}
       {poCount >= 2 && chartData && (
-        <div className="glass-card-solid p-5" style={{ height: 280 }}>
+        <div className="glass-card-solid p-5">
           <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--text-secondary)' }}>Delivery Timeline — Last 10 Orders</h3>
-          <div style={{ height: 200 }}>
+          <div style={{ height: 220 }}>
             <Bar
               data={{
                 labels: chartData.last10.map(po => po.id),
