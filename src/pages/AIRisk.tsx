@@ -195,12 +195,13 @@ function computeHistoricalMetrics(
   const allSpend = pos.reduce((sum, po) => sum + po.total, 0);
   const spendConcentration = allSpend > 0 ? (totalSpend / allSpend) * 100 : 0;
 
-  // Ratings
-  const overallRating = rating ? rating.overall : vendor.rating;
-  const qualityRating = rating ? rating.quality : vendor.rating;
-  const deliveryRating = rating ? rating.delivery : vendor.rating;
-  const costRating = rating ? rating.cost : vendor.rating;
-  const responsivenessRating = rating ? rating.responsiveness : vendor.rating;
+  // Ratings (VendorRating stores scores on 1-100 scale; fallback to 0 if no rating found)
+  const overallRating = rating ? rating.overall : 0;
+  const qualityRating = rating ? rating.quality : 0;
+  const deliveryRating = rating ? rating.delivery : 0;
+  const costRating = rating ? rating.cost : 0;
+  // VendorRating has no responsiveness field; use innovation as proxy or 0
+  const responsivenessRating = rating ? (rating.innovation ?? 0) : 0;
 
   return {
     totalOrders,
@@ -291,15 +292,15 @@ COMPUTED HISTORICAL METRICS (use these numbers exactly):
 - Late Orders: ${metrics.lateOrders}
 - On-Time Orders: ${metrics.onTimeOrders}
 - Currently Overdue Orders: ${metrics.currentOverdueOrders}
-- On-Time Rate: ${metrics.onTimeRate.toFixed(1)}%
+- On-Time Rate: ${(metrics.onTimeRate ?? 0).toFixed(1)}%
 - Average Lead Time: ${metrics.avgLeadTime} days (declared: ${metrics.declaredLeadTime} days)
 - Total Spend: $${metrics.totalSpend.toLocaleString()}
-- Spend Concentration: ${metrics.spendConcentration.toFixed(1)}%
-- Overall Rating: ${metrics.overallRating.toFixed(1)}/5.0
-- Quality Rating: ${metrics.qualityRating.toFixed(1)}/5.0
-- Delivery Rating: ${metrics.deliveryRating.toFixed(1)}/5.0
-- Cost Rating: ${metrics.costRating.toFixed(1)}/5.0
-- Responsiveness Rating: ${metrics.responsivenessRating.toFixed(1)}/5.0
+- Spend Concentration: ${(metrics.spendConcentration ?? 0).toFixed(1)}%
+- Overall Rating: ${(metrics.overallRating ?? 0).toFixed(1)}/100
+- Quality Rating: ${(metrics.qualityRating ?? 0).toFixed(1)}/100
+- Delivery Rating: ${(metrics.deliveryRating ?? 0).toFixed(1)}/100
+- Cost Rating: ${(metrics.costRating ?? 0).toFixed(1)}/100
+- Responsiveness Rating: ${(metrics.responsivenessRating ?? 0).toFixed(1)}/100
 
 SYSTEM-COMPUTED RISK SCORE:
 - Overall Risk Score: ${riskScore}/100
@@ -775,10 +776,10 @@ export default function AIRisk() {
                   <MetricPreview label="Delivered" value={historicalMetrics.deliveredOrders} />
                   <MetricPreview label="Late Orders" value={historicalMetrics.lateOrders} color={historicalMetrics.lateOrders > 0 ? 'red' : undefined} />
                   <MetricPreview label="Overdue Now" value={historicalMetrics.currentOverdueOrders} color={historicalMetrics.currentOverdueOrders > 0 ? 'red' : undefined} />
-                  <MetricPreview label="On-Time Rate" value={`${historicalMetrics.onTimeRate.toFixed(0)}%`} color={historicalMetrics.onTimeRate >= 85 ? 'green' : 'orange'} />
+                  <MetricPreview label="On-Time Rate" value={`${(historicalMetrics.onTimeRate ?? 0).toFixed(0)}%`} color={(historicalMetrics.onTimeRate ?? 0) >= 85 ? 'green' : 'orange'} />
                   <MetricPreview label="Avg Lead Time" value={`${historicalMetrics.avgLeadTime}d`} />
                   <MetricPreview label="Total Spend" value={`$${historicalMetrics.totalSpend.toLocaleString()}`} />
-                  <MetricPreview label="Spend Conc." value={`${historicalMetrics.spendConcentration.toFixed(0)}%`} color={historicalMetrics.spendConcentration > 25 ? 'orange' : undefined} />
+                  <MetricPreview label="Spend Conc." value={`${(historicalMetrics.spendConcentration ?? 0).toFixed(0)}%`} color={(historicalMetrics.spendConcentration ?? 0) > 25 ? 'orange' : undefined} />
                 </div>
                 {supplierRisk && supplierRisk.detectedRisks.length > 0 && (
                   <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
