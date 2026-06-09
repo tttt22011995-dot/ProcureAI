@@ -47,7 +47,10 @@ function getScoreIcon(score: number) {
 }
 
 function getRiskColor(level: string): string {
-  return statusColorMap[level] ?? 'gray';
+  if (level === 'low') return 'green';
+  if (level === 'medium') return 'orange';
+  if (level === 'high') return 'red';
+  return 'blue';
 }
 
 // ─── Main Component ───
