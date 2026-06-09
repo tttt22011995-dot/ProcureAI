@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -11,18 +11,30 @@ import {
   Tooltip,
   Legend,
   Filler,
+  type ChartData,
+  type ChartOptions,
 } from 'chart.js';
-import { Bar, Doughnut, Line } from 'react-chartjs-2';
+import { Chart } from 'react-chartjs-2';
 import {
-  DollarSign,
   Users,
   FileText,
-  TrendingUp,
+  AlertTriangle,
+  BarChart3,
   ArrowUpRight,
   ArrowDownRight,
+  Minus,
+  Inbox,
 } from 'lucide-react';
 import { useAnimatedCounter } from '../lib/useAnimatedCounter';
-import { getVendors, getPurchaseOrders, getDeliveryPerformance } from '../lib/data';
+import {
+  getVendors,
+  getPurchaseOrders,
+  getVendorRatings,
+  isOverdue,
+  getEffectivePOStatus,
+  poStatusColorMap,
+} from '../lib/data';
+import type { PurchaseOrder } from '../lib/data';
 
 ChartJS.register(
   CategoryScale, LinearScale, BarElement, ArcElement,
@@ -31,6 +43,8 @@ ChartJS.register(
 
 const chartFont = { family: 'Inter, system-ui, sans-serif' };
 
+// ─── KPI Card ───
+
 function KpiCard({
   icon: Icon,
   label,
@@ -38,8 +52,7 @@ function KpiCard({
   prefix = '',
   suffix = '',
   accent,
-  change,
-  changeLabel,
+  trend,
 }: {
   icon: React.ElementType;
   label: string;
@@ -47,10 +60,10 @@ function KpiCard({
   prefix?: string;
   suffix?: string;
   accent: string;
-  change?: number;
-  changeLabel?: string;
+  trend: 'up' | 'down' | 'stable';
 }) {
   const animated = useAnimatedCounter(value);
+
   return (
     <div className={`glass-card kpi-accent-${accent} p-5 flex flex-col gap-2`}>
       <div className="flex items-center justify-between">
@@ -67,97 +80,229 @@ function KpiCard({
       <div className="text-2xl font-bold" style={{ color: 'var(--text)' }}>
         {prefix}{animated.toLocaleString()}{suffix}
       </div>
-      {change !== undefined && (
-        <div className="flex items-center gap-1 text-xs font-medium" style={{ color: change >= 0 ? 'var(--green)' : 'var(--red)' }}>
-          {change >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
-          {Math.abs(change)}% {changeLabel}
-        </div>
-      )}
+      <div className="flex items-center gap-1 text-xs font-medium" style={{ color: trend === 'up' ? 'var(--green)' : trend === 'down' ? 'var(--red)' : 'var(--text-muted)' }}>
+        {trend === 'up' && <ArrowUpRight size={12} />}
+        {trend === 'down' && <ArrowDownRight size={12} />}
+        {trend === 'stable' && <Minus size={12} />}
+        {trend === 'up' ? 'Improving' : trend === 'down' ? 'Declining' : 'Stable'}
+      </div>
     </div>
   );
 }
 
+// ─── Monthly PO Activity Chart ───
+
+type Range = '3M' | '6M' | '12M';
+
+const RANGE_MONTHS: Record<Range, number> = { '3M': 3, '6M': 6, '12M': 12 };
+
+function buildMonthlyData(pos: PurchaseOrder[], range: Range) {
+  const now = new Date();
+  const months = RANGE_MONTHS[range];
+
+  const buckets: { key: string; label: string; count: number; spend: number }[] = [];
+  for (let i = months - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const label = d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+    buckets.push({ key, label, count: 0, spend: 0 });
+  }
+
+  const availableMonths = buckets.length;
+  pos.forEach(po => {
+    const poMonth = po.createdAt.slice(0, 7);
+    const bucket = buckets.find(b => b.key === poMonth);
+    if (bucket) {
+      bucket.count += 1;
+      bucket.spend += po.total;
+    }
+  });
+
+  return { buckets, availableMonths, requestedMonths: months };
+}
+
+// ─── Fallback Table ───
+
+function FallbackTable({ buckets }: { buckets: { label: string; count: number; spend: number }[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="glass-table">
+        <thead>
+          <tr><th>Month</th><th>PO Count</th><th>Total Spend</th></tr>
+        </thead>
+        <tbody>
+          {buckets.map(b => (
+            <tr key={b.label}>
+              <td style={{ color: 'var(--text)' }}>{b.label}</td>
+              <td>{b.count}</td>
+              <td>${b.spend.toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ─── Status Badge ───
+
+function StatusBadge({ status }: { status: string }) {
+  const color = poStatusColorMap[status] ?? 'blue';
+  return <span className={`glass-badge glass-badge-${color}`}>{status}</span>;
+}
+
+// ─── Recent PO Row (desktop) ───
+
+function PORow({ po }: { po: PurchaseOrder }) {
+  const effectiveStatus = getEffectivePOStatus(po);
+  return (
+    <tr>
+      <td className="font-mono font-medium" style={{ color: 'var(--text)' }}>{po.id}</td>
+      <td>{po.vendorName}</td>
+      <td>{po.createdAt}</td>
+      <td style={{ color: 'var(--text)' }}>${po.total.toLocaleString()}</td>
+      <td><StatusBadge status={effectiveStatus} /></td>
+    </tr>
+  );
+}
+
+// ─── Recent PO Card (mobile) ───
+
+function POCard({ po }: { po: PurchaseOrder }) {
+  const effectiveStatus = getEffectivePOStatus(po);
+  return (
+    <div className="glass-card p-4 flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <span className="font-mono font-semibold" style={{ color: 'var(--text)' }}>{po.id}</span>
+        <StatusBadge status={effectiveStatus} />
+      </div>
+      <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>{po.vendorName}</div>
+      <div className="flex items-center justify-between text-xs" style={{ color: 'var(--text-muted)' }}>
+        <span>{po.createdAt}</span>
+        <span className="font-semibold" style={{ color: 'var(--text)' }}>${po.total.toLocaleString()}</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Dashboard ───
+
 export default function Dashboard() {
   const vendors = getVendors();
   const pos = getPurchaseOrders();
-  const deliveries = getDeliveryPerformance();
+  const ratings = getVendorRatings();
+  const [range, setRange] = useState<Range>('6M');
+  const [chartError, setChartError] = useState(false);
 
-  const totalSpend = useMemo(() => vendors.reduce((s, v) => s + v.spend, 0), [vendors]);
-  const activeVendors = useMemo(() => vendors.filter(v => v.status === 'active').length, [vendors]);
-  const openPOs = useMemo(() => pos.filter(p => ['draft', 'pending', 'approved'].includes(p.status)).length, [pos]);
-  const onTimeRate = useMemo(() => {
-    const completed = deliveries.filter(d => d.actualDate);
-    if (completed.length === 0) return 94;
-    const onTime = completed.filter(d => d.status === 'on-time').length;
-    return Math.round((onTime / completed.length) * 100);
-  }, [deliveries]);
+  const totalVendors = vendors.length;
+  const openPOs = pos.filter(p => ['draft', 'pending', 'approved'].includes(p.status)).length;
+  const overdueCount = pos.filter(p => isOverdue(p)).length;
+  const avgScore = useMemo(() => {
+    if (!ratings.length) return 0;
+    return Math.round((ratings.reduce((s, r) => s + r.overall, 0) / ratings.length) * 20);
+  }, [ratings]);
 
-  const spendByCategory = useMemo(() => {
-    const map: Record<string, number> = {};
-    vendors.forEach(v => { map[v.category] = (map[v.category] || 0) + v.spend; });
-    return map;
-  }, [vendors]);
+  const vendorTrend: 'up' | 'down' | 'stable' = useMemo(() => {
+    const trends = ratings.map(r => r.trend);
+    const ups = trends.filter(t => t === 'up').length;
+    const downs = trends.filter(t => t === 'down').length;
+    if (ups > downs) return 'up';
+    if (downs > ups) return 'down';
+    return 'stable';
+  }, [ratings]);
 
-  const poByStatus = useMemo(() => {
-    const map: Record<string, number> = {};
-    pos.forEach(p => { map[p.status] = (map[p.status] || 0) + 1; });
-    return map;
-  }, [pos]);
+  const { buckets, availableMonths, requestedMonths } = useMemo(
+    () => buildMonthlyData(pos, range),
+    [pos, range]
+  );
 
-  const monthlySpend = useMemo(() => ({
-    labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-    data: [320000, 410000, 380000, 520000, 470000, 540000],
-  }), []);
+  const showPartialNotice = availableMonths < requestedMonths;
 
-  const doughnutData = {
-    labels: Object.keys(spendByCategory),
-    datasets: [{
-      data: Object.values(spendByCategory),
-      backgroundColor: ['#60A5FA', '#22D3EE', '#34D399', '#FB923C', '#A78BFA'],
-      borderWidth: 0,
-      hoverOffset: 6,
-    }],
-  };
+  const chartData: ChartData<'bar' | 'line', number[], string> = useMemo(() => ({
+    labels: buckets.map(b => b.label),
+    datasets: [
+      {
+        type: 'bar' as const,
+        label: 'PO Count',
+        data: buckets.map(b => b.count),
+        backgroundColor: 'rgba(96,165,250,0.5)',
+        borderColor: '#60A5FA',
+        borderWidth: 1,
+        borderRadius: 8,
+        yAxisID: 'y',
+        order: 2,
+      },
+      {
+        type: 'line' as const,
+        label: 'Total Spend ($)',
+        data: buckets.map(b => b.spend),
+        borderColor: '#FB923C',
+        backgroundColor: 'rgba(251,146,60,0.08)',
+        fill: true,
+        tension: 0.4,
+        pointBackgroundColor: '#FB923C',
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        yAxisID: 'y1',
+        order: 1,
+      },
+    ],
+  }), [buckets]);
 
-  const barData = {
-    labels: Object.keys(poByStatus).map(s => s.charAt(0).toUpperCase() + s.slice(1)),
-    datasets: [{
-      label: 'Purchase Orders',
-      data: Object.values(poByStatus),
-      backgroundColor: 'rgba(96,165,250,0.5)',
-      borderColor: '#60A5FA',
-      borderWidth: 1,
-      borderRadius: 8,
-    }],
-  };
-
-  const lineData = {
-    labels: monthlySpend.labels,
-    datasets: [{
-      label: 'Monthly Spend',
-      data: monthlySpend.data,
-      borderColor: '#22D3EE',
-      backgroundColor: 'rgba(34,211,238,0.08)',
-      fill: true,
-      tension: 0.4,
-      pointBackgroundColor: '#22D3EE',
-      pointRadius: 4,
-      pointHoverRadius: 6,
-    }],
-  };
-
-  const chartOptions = {
+  const chartOptions: ChartOptions<'bar' | 'line'> = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
     plugins: {
-      legend: { display: false, labels: { font: chartFont } },
-      tooltip: { backgroundColor: 'rgba(6,17,32,0.9)', titleFont: chartFont, bodyFont: chartFont, cornerRadius: 12 },
+      legend: {
+        position: 'top',
+        labels: {
+          color: '#94A3B8',
+          font: chartFont,
+          usePointStyle: true,
+          pointStyleWidth: 8,
+          padding: 16,
+        },
+      },
+      tooltip: {
+        backgroundColor: 'rgba(6,17,32,0.92)',
+        titleFont: chartFont,
+        bodyFont: chartFont,
+        cornerRadius: 12,
+        padding: 12,
+      },
     },
     scales: {
-      x: { ticks: { color: '#94A3B8', font: chartFont }, grid: { display: false }, border: { display: false } },
-      y: { ticks: { color: '#94A3B8', font: chartFont }, grid: { color: 'rgba(148,197,255,0.08)' }, border: { display: false } },
+      x: {
+        ticks: { color: '#94A3B8', font: chartFont },
+        grid: { display: false },
+        border: { display: false },
+      },
+      y: {
+        position: 'left',
+        ticks: { color: '#94A3B8', font: chartFont, stepSize: 1 },
+        grid: { color: 'rgba(148,197,255,0.08)' },
+        border: { display: false },
+        title: { display: true, text: 'PO Count', color: '#94A3B8', font: chartFont },
+      },
+      y1: {
+        position: 'right',
+        ticks: {
+          color: '#FB923C',
+          font: chartFont,
+          callback: (v) => `$${Number(v).toLocaleString()}`,
+        },
+        grid: { drawOnChartArea: false },
+        border: { display: false },
+        title: { display: true, text: 'Spend (USD)', color: '#FB923C', font: chartFont },
+      },
     },
-  };
+  }), []);
+
+  const recentPOs = useMemo(
+    () => [...pos].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 10),
+    [pos]
+  );
 
   return (
     <div className="space-y-6">
@@ -168,45 +313,78 @@ export default function Dashboard() {
 
       {/* KPI Row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        <KpiCard icon={DollarSign} label="Total Spend" value={Math.round(totalSpend / 1000)} prefix="$" suffix="K" accent="blue" change={12} changeLabel="vs last quarter" />
-        <KpiCard icon={Users} label="Active Vendors" value={activeVendors} suffix={` of ${vendors.length}`} accent="cyan" change={5} changeLabel="vs last month" />
-        <KpiCard icon={FileText} label="Open POs" value={openPOs} accent="orange" change={-8} changeLabel="vs last week" />
-        <KpiCard icon={TrendingUp} label="On-Time Rate" value={onTimeRate} suffix="%" accent="green" change={3} changeLabel="vs last quarter" />
+        <KpiCard icon={Users} label="Total Vendors" value={totalVendors} accent="blue" trend={vendorTrend} />
+        <KpiCard icon={FileText} label="Open POs" value={openPOs} accent="green" trend={openPOs > 0 ? 'up' : 'stable'} />
+        <KpiCard icon={AlertTriangle} label="Overdue Deliveries" value={overdueCount} accent="red" trend={overdueCount > 0 ? 'down' : 'stable'} />
+        <KpiCard icon={BarChart3} label="Avg Vendor Score" value={avgScore} suffix="/100" accent="orange" trend={vendorTrend} />
       </div>
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="glass-card-solid p-5 lg:col-span-2" style={{ height: 320 }}>
-          <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-secondary)' }}>Monthly Spend Trend</h3>
-          <div style={{ height: 250 }}>
-            <Line data={lineData} options={chartOptions} />
+      {/* Monthly PO Activity */}
+      <div className="glass-card-solid p-5">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>Monthly PO Activity</h3>
+          <div className="flex items-center gap-2">
+            {(['3M', '6M', '12M'] as Range[]).map(r => (
+              <button
+                key={r}
+                className={`glass-button text-xs ${range === r ? 'glass-button-primary' : ''}`}
+                onClick={() => setRange(r)}
+              >
+                {r}
+              </button>
+            ))}
           </div>
         </div>
-        <div className="glass-card-solid p-5" style={{ height: 320 }}>
-          <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-secondary)' }}>Spend by Category</h3>
-          <div style={{ height: 250 }}>
-            <Doughnut
-              data={doughnutData}
-              options={{
-                responsive: true,
-                maintainAspectRatio: false,
-                cutout: '65%',
-                plugins: {
-                  legend: { position: 'bottom' as const, labels: { color: '#CBD5E1', font: chartFont, padding: 12, usePointStyle: true, pointStyleWidth: 8 } },
-                  tooltip: { backgroundColor: 'rgba(6,17,32,0.9)', cornerRadius: 12 },
-                },
-              }}
+        {showPartialNotice && (
+          <div className="text-xs mb-3 px-1" style={{ color: 'var(--orange)' }}>
+            Showing available data only ({availableMonths} of {requestedMonths} months)
+          </div>
+        )}
+        <div style={{ height: 300 }}>
+          {chartError ? (
+            <FallbackTable buckets={buckets} />
+          ) : (
+            <Chart
+              type="bar"
+              data={chartData}
+              options={chartOptions}
+              onError={() => setChartError(true)}
             />
-          </div>
+          )}
         </div>
       </div>
 
-      {/* PO Status Bar */}
-      <div className="glass-card-solid p-5" style={{ height: 280 }}>
-        <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-secondary)' }}>Purchase Orders by Status</h3>
-        <div style={{ height: 210 }}>
-          <Bar data={barData} options={chartOptions} />
-        </div>
+      {/* Recent Purchase Orders */}
+      <div className="glass-card-solid p-5">
+        <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-secondary)' }}>Recent Purchase Orders</h3>
+        {recentPOs.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 gap-3" style={{ color: 'var(--text-muted)' }}>
+            <Inbox size={32} />
+            <span className="text-sm">No purchase orders found</span>
+          </div>
+        ) : (
+          <>
+            <div className="hidden md:block overflow-x-auto">
+              <table className="glass-table">
+                <thead>
+                  <tr>
+                    <th>PO Number</th>
+                    <th>Vendor</th>
+                    <th>Date</th>
+                    <th>Total</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentPOs.map(po => <PORow key={po.id} po={po} />)}
+                </tbody>
+              </table>
+            </div>
+            <div className="md:hidden space-y-3">
+              {recentPOs.map(po => <POCard key={po.id} po={po} />)}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

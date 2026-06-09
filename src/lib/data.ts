@@ -239,6 +239,97 @@ const sampleDeliveries: DeliveryPerformance[] = [
   { id: 'd5', poId: 'PO-1005', vendorId: 'v1', vendorName: 'Apex Materials Inc.', promisedDate: '2026-07-15', actualDate: null, status: 'pending', delayDays: 0 },
 ];
 
+// ─── Business Logic ───
+
+export function isOverdue(po: PurchaseOrder): boolean {
+  if (po.status === 'delivered' || po.status === 'cancelled') return false;
+  const expected = new Date(po.deliveryDate);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return expected < today;
+}
+
+export type POStatusColor = 'blue' | 'purple' | 'orange' | 'cyan' | 'green' | 'red' | 'grey';
+
+export const poStatusColorMap: Record<string, POStatusColor> = {
+  draft: 'purple',
+  pending: 'blue',
+  approved: 'purple',
+  shipped: 'cyan',
+  delivered: 'green',
+  cancelled: 'red',
+  ordered: 'blue',
+  confirmed: 'purple',
+  'in-transit': 'orange',
+  invoiced: 'grey',
+  overdue: 'red',
+};
+
+export function getEffectivePOStatus(po: PurchaseOrder): string {
+  if (isOverdue(po)) return 'overdue';
+  return po.status;
+}
+
+export function computeAlerts(): Array<{ id: string; type: string; message: string; page: Page; entityId: string }> {
+  const alerts: Array<{ id: string; type: string; message: string; page: Page; entityId: string }> = [];
+  const pos = getPurchaseOrders();
+  const ratings = getVendorRatings();
+  const vendors = getVendors();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // (a) Overdue POs
+  pos.forEach(po => {
+    if (isOverdue(po)) {
+      alerts.push({
+        id: `overdue-${po.id}`,
+        type: 'overdue',
+        message: `${po.id} (${po.vendorName}) is overdue — expected ${po.deliveryDate}`,
+        page: 'purchase-orders',
+        entityId: po.id,
+      });
+    }
+  });
+
+  // (b) Vendor with score < 60 (overall rating < 3.0 on 5-point scale = 60%)
+  ratings.forEach(vr => {
+    if (vr.overall < 3.0) {
+      const vendor = vendors.find(v => v.id === vr.vendorId);
+      alerts.push({
+        id: `low-score-${vr.vendorId}`,
+        type: 'low-score',
+        message: `${vendor?.name ?? vr.vendorId} score is ${(vr.overall * 20).toFixed(0)}/100`,
+        page: 'scorecard',
+        entityId: vr.vendorId,
+      });
+    }
+  });
+
+  // (c) PO stuck in pending/approved for >= 7 days
+  pos.forEach(po => {
+    if (po.status === 'pending' || po.status === 'approved') {
+      const created = new Date(po.createdAt);
+      created.setHours(0, 0, 0, 0);
+      const daysSince = Math.floor((today.getTime() - created.getTime()) / (1000 * 60 * 60 * 24));
+      if (daysSince >= 7) {
+        alerts.push({
+          id: `stuck-${po.id}`,
+          type: 'stuck',
+          message: `${po.id} stuck in ${po.status} for ${daysSince} days`,
+          page: 'purchase-orders',
+          entityId: po.id,
+        });
+      }
+    }
+  });
+
+  return alerts;
+}
+
+export type Page = 'dashboard' | 'vendors' | 'purchase-orders' | 'delivery' | 'scorecard' | 'ai-risk';
+
+// ─── Seed Data ───
+
 export function seedData(): void {
   if (getVendors().length > 0) return;
   setVendors(sampleVendors);

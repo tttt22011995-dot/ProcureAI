@@ -28,7 +28,7 @@ const priorityColor: Record<string, string> = {
 };
 
 export default function PurchaseOrders() {
-  const [pos, setPos] = useState<PurchaseOrder[]>(() => getPurchaseOrders());
+  const [pos] = useState<PurchaseOrder[]>(() => getPurchaseOrders());
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [expanded, setExpanded] = useState<string | null>(null);

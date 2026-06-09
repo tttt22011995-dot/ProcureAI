@@ -1,18 +1,18 @@
 import { useState, useEffect } from 'react';
-import Sidebar, { type Page } from './components/Sidebar';
+import Sidebar from './components/Sidebar';
 import Dashboard from './pages/Dashboard';
 import Vendors from './pages/Vendors';
 import PurchaseOrders from './pages/PurchaseOrders';
 import Delivery from './pages/Delivery';
 import Scorecard from './pages/Scorecard';
 import AiRisk from './pages/AiRisk';
-import { seedData } from './lib/data';
+import { seedData, type Page } from './lib/data';
 
 function getInitialTheme(): boolean {
   try {
     const stored = localStorage.getItem('theme');
     if (stored === 'light') return false;
-    return true; // default dark
+    return true;
   } catch {
     return true;
   }

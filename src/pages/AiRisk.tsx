@@ -1,11 +1,11 @@
 import { useState, useMemo } from 'react';
 import {
   ShieldAlert, AlertTriangle, AlertCircle, Info,
-  TrendingDown, Clock, DollarSign, Users,
+  TrendingDown, Clock, DollarSign,
 } from 'lucide-react';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend, Filler } from 'chart.js';
 import { Bar, Doughnut } from 'react-chartjs-2';
-import { getVendors, getPurchaseOrders, getVendorRatings, getDeliveryPerformance } from '../lib/data';
+import { getVendors, getVendorRatings } from '../lib/data';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend, Filler);
 
@@ -37,9 +37,7 @@ const typeIcon: Record<string, React.ElementType> = {
 
 export default function AiRisk() {
   const vendors = getVendors();
-  const pos = getPurchaseOrders();
   const ratings = getVendorRatings();
-  const deliveries = getDeliveryPerformance();
 
   const alerts = useMemo<RiskAlert[]>(() => {
     const result: RiskAlert[] = [];

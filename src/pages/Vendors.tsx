@@ -3,7 +3,7 @@ import { Search, Plus, Star, MapPin, Mail, ExternalLink } from 'lucide-react';
 import { getVendors, getVendorRatings, type Vendor, type VendorRating } from '../lib/data';
 
 export default function Vendors() {
-  const [vendors, setVendors] = useState<Vendor[]>(() => getVendors());
+  const [vendors] = useState<Vendor[]>(() => getVendors());
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [selected, setSelected] = useState<Vendor | null>(null);
@@ -79,7 +79,6 @@ export default function Vendors() {
             </thead>
             <tbody>
               {filtered.map(v => {
-                const r = ratingFor(v.id);
                 return (
                   <tr key={v.id} className="cursor-pointer" onClick={() => setSelected(v)}>
                     <td className="font-medium" style={{ color: 'var(--text)' }}>{v.name}</td>
