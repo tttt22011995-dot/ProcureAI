@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import ReactDOM from 'react-dom';
 import {
   Search, Plus, Eye, Pencil, Copy, Trash2, X, Printer,
   ChevronDown,
@@ -746,13 +747,23 @@ function LineItemRow({
   catalogError: boolean;
 }) {
   const [autocompleteOpen, setAutocompleteOpen] = useState(false);
+  const [dropPos, setDropPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const qtyInputRef = useRef<HTMLInputElement>(null);
   const priceInputRef = useRef<HTMLInputElement>(null);
+  const dropRef = useRef<HTMLDivElement>(null);
 
   const matchingItems = catalogItems.filter(c =>
     c.name.toLowerCase().includes(item.name.toLowerCase()) && item.name.length > 0
   ).slice(0, 6);
+
+  const openDrop = () => {
+    if (nameInputRef.current) {
+      const r = nameInputRef.current.getBoundingClientRect();
+      setDropPos({ top: r.bottom + 4, left: r.left, width: r.width });
+      setAutocompleteOpen(true);
+    }
+  };
 
   const handleNameSelect = (catalogItem: CatalogItem) => {
     updateItem(idx, 'name', catalogItem.name);
@@ -784,20 +795,27 @@ function LineItemRow({
     <div className="glass-card-solid p-3">
       <div className="grid grid-cols-12 gap-3 items-center">
         <div className="col-span-5 relative">
-          <input ref={nameInputRef} data-field="name" className="glass-input w-full" placeholder="Item name..." value={item.name} onChange={e => { updateItem(idx, 'name', e.target.value); setAutocompleteOpen(true); }} onFocus={() => setAutocompleteOpen(true)} onBlur={() => setTimeout(() => setAutocompleteOpen(false), 150)} onKeyDown={e => handleKeyDown(e, 'name')} />
+          <input ref={nameInputRef} data-field="name" className="glass-input w-full" placeholder="Item name..." value={item.name} onChange={e => { updateItem(idx, 'name', e.target.value); openDrop(); }} onFocus={() => openDrop()} onBlur={() => setTimeout(() => setAutocompleteOpen(false), 150)} onKeyDown={e => handleKeyDown(e, 'name')} />
           {catalogLoading && <div className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px]" style={{ color: 'var(--text-muted)' }}>Loading...</div>}
           {!catalogLoading && catalogError && <div className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px]" style={{ color: 'var(--orange)' }}>Offline</div>}
           {!catalogLoading && !catalogError && catalogItems.length === 0 && (
             <div className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px]" style={{ color: 'var(--text-muted)' }}>No items</div>
           )}
-          {autocompleteOpen && matchingItems.length > 0 && (
-            <div className="absolute left-0 right-0 top-full mt-1 glass-panel z-10 max-h-[160px] overflow-y-auto" style={{ borderRadius: 10 }}>
+          {autocompleteOpen && matchingItems.length > 0 && dropPos && ReactDOM.createPortal(
+            <div ref={dropRef} style={{
+              position: 'fixed', top: dropPos.top, left: dropPos.left,
+              width: dropPos.width, zIndex: 99999, borderRadius: 10, maxHeight: 200, overflowY: 'auto',
+            }} className="glass-panel">
               {matchingItems.map((c, i) => (
-                <div key={i} className="px-3 py-2 text-sm cursor-pointer transition-colors hover:bg-[rgba(96,165,250,0.08)]" style={{ color: 'var(--text-secondary)' }} onMouseDown={() => handleNameSelect(c)}>
-                  {c.name} <span style={{ color: 'var(--text-muted)' }}>${c.unitPrice}</span>
+                <div key={i} className="px-3 py-2 text-sm cursor-pointer transition-colors hover:bg-[rgba(96,165,250,0.08)]"
+                  style={{ color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between' }}
+                  onMouseDown={() => handleNameSelect(c)}>
+                  <span>{c.name}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>${c.unitPrice}</span>
                 </div>
               ))}
-            </div>
+            </div>,
+            document.body
           )}
         </div>
         <div className="col-span-2">
