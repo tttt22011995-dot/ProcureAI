@@ -26,6 +26,7 @@ interface SidebarProps {
   onToggleTheme: () => void;
   isMobileOpen?: boolean;
   onClose?: () => void;
+  onOpenTour?: () => void;
 }
 
 const navItems: { page: Page; label: string; icon: React.ElementType }[] = [
@@ -50,7 +51,7 @@ const alertColor: Record<string, string> = {
   stuck: 'purple',
 };
 
-export default function Sidebar({ active, onNavigate, isDark, onToggleTheme, isMobileOpen, onClose }: SidebarProps) {
+export default function Sidebar({ active, onNavigate, isDark, onToggleTheme, isMobileOpen, onClose, onOpenTour }: SidebarProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number } | null>(null);
   const bellRef = useRef<HTMLButtonElement>(null);
@@ -193,10 +194,27 @@ export default function Sidebar({ active, onNavigate, isDark, onToggleTheme, isM
 
         {/* Footer */}
         <div
-          className="text-xs font-medium pt-4 mt-4 px-1"
-          style={{ color: 'var(--text-muted)', borderTop: '1px solid var(--glass-border)' }}
+          className="pt-4 mt-4 px-1"
+          style={{ borderTop: '1px solid var(--glass-border)' }}
         >
-          ProcureAI v1.0
+          {onOpenTour && (
+            <button
+              onClick={onOpenTour}
+              className="w-full flex items-center gap-2 px-3 py-2 mb-3 rounded-xl text-sm font-medium transition-all"
+              style={{
+                background: 'linear-gradient(135deg, rgba(96,165,250,0.15), rgba(34,211,238,0.15))',
+                border: '1px solid rgba(96,165,250,0.3)',
+                color: 'var(--blue)',
+                cursor: 'pointer',
+              }}
+            >
+              <span>🧭</span>
+              <span>Start Tour</span>
+            </button>
+          )}
+          <div className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+            ProcureAI v1.0
+          </div>
         </div>
       </aside>
 
