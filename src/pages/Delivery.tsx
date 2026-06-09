@@ -306,9 +306,7 @@ export default function Delivery() {
       const nextPerf = deliveryPerf.filter(dp => dp.poId !== po.id).concat(newPerf);
       setDeliveryPerfState(nextPerf);
     }
-
-    triggerRefresh();
-  }, [pos, deliveryPerf, triggerRefresh]);
+  }, [pos, deliveryPerf]);
 
   const handleRevertStatus = useCallback(async (po: PurchaseOrder) => {
     const currentStatus = po.deliveryStatus || 'ordered';
@@ -328,8 +326,7 @@ export default function Delivery() {
 
     const next = pos.map(p => p.id === po.id ? updated : p);
     setPosState(next);
-    triggerRefresh();
-  }, [pos, triggerRefresh]);
+  }, [pos]);
 
   // ─── Notes Handlers ───
 
@@ -369,8 +366,7 @@ export default function Delivery() {
     setPosState(next);
     setNewNoteText(prev => ({ ...prev, [po.id]: '' }));
     showToast('Note saved', 'success');
-    triggerRefresh();
-  }, [newNoteText, pos, showToast, triggerRefresh]);
+  }, [newNoteText, pos, showToast]);
 
   const handleDeleteNote = useCallback(async (po: PurchaseOrder, idx: number) => {
     const updated = {
@@ -382,11 +378,10 @@ export default function Delivery() {
       const next = pos.map(p => p.id === po.id ? updated : p);
       setPosState(next);
       showToast('Note deleted', 'info');
-      triggerRefresh();
     } else {
       showToast('Failed to save', 'error');
     }
-  }, [pos, showToast, triggerRefresh]);
+  }, [pos, showToast]);
 
   // ─── On-time Badge ───
 
