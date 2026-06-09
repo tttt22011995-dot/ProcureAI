@@ -154,6 +154,7 @@ export default function Scorecard() {
 
   const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [showAllAlerts, setShowAllAlerts] = useState(false);
 
   // ─── Compute Vendor Metrics ───
 
@@ -187,8 +188,14 @@ export default function Scorecard() {
         avgLeadTime = Math.round(totalLeadDays / deliveredPOs.length);
       }
 
-      const avgRating = vendorRatings ? vendorRatings.overall * 20 : vendor.rating * 20; // Convert 5-point to 100-point
-      const trend = vendorRatings?.trend || 'stable';
+      const avgRating = vendorRatings ? vendorRatings.overall : 0; // already 0-100
+      // Derive trend from onTimeRate and rating
+      const trend: 'up' | 'down' | 'stable' = (() => {
+        const score = (onTimeRate + (vendorRatings?.overall ?? 0)) / 2;
+        if (score >= 80) return 'up';
+        if (score < 60) return 'down';
+        return 'stable';
+      })();
       const classification = getClassification(onTimeRate, avgRating);
 
       return {
@@ -228,7 +235,7 @@ export default function Scorecard() {
 
     // Average vendor rating (0-100 scale)
     const avgVendorRating = ratings.length > 0
-      ? (ratings.reduce((sum, r) => sum + r.overall, 0) / ratings.length) * 20
+      ? ratings.reduce((sum, r) => sum + r.overall, 0) / ratings.length
       : 0;
 
     return {
@@ -314,7 +321,7 @@ export default function Scorecard() {
         ? vendorsWithData.reduce((sum, vm) => sum + vm.onTimeRate, 0) / vendorsWithData.length
         : 0,
       avgRating: ratings.length > 0
-        ? (ratings.reduce((sum, r) => sum + r.overall, 0) / ratings.length) * 20
+        ? ratings.reduce((sum, r) => sum + r.overall, 0) / ratings.length
         : 0,
       avgLeadTime: vendorsWithData.length > 0
         ? vendorsWithData.reduce((sum, vm) => sum + vm.avgLeadTime, 0) / vendorsWithData.length
@@ -380,7 +387,7 @@ export default function Scorecard() {
       datasets: [
         {
           label: 'Quality',
-          data: [base[0] - 0.3, base[0] - 0.1, base[0], base[0] + 0.1].map(v => Math.min(5, Math.max(0, v))),
+          data: [base[0] - 3, base[0] - 1, base[0], base[0] + 1].map(v => Math.min(100, Math.max(0, v))),
           borderColor: '#60A5FA',
           backgroundColor: 'rgba(96,165,250,0.1)',
           tension: 0.4,
@@ -388,7 +395,7 @@ export default function Scorecard() {
         },
         {
           label: 'Delivery',
-          data: [base[1] - 0.2, base[1] + 0.1, base[1] - 0.1, base[1]].map(v => Math.min(5, Math.max(0, v))),
+          data: [base[1] - 2, base[1] + 1, base[1] - 1, base[1]].map(v => Math.min(100, Math.max(0, v))),
           borderColor: '#34D399',
           backgroundColor: 'rgba(52,211,153,0.1)',
           tension: 0.4,
@@ -396,7 +403,7 @@ export default function Scorecard() {
         },
         {
           label: 'Responsiveness',
-          data: [base[2], base[2] - 0.2, base[2] + 0.2, base[2] + 0.1].map(v => Math.min(5, Math.max(0, v))),
+          data: [base[2], base[2] - 2, base[2] + 2, base[2] + 1].map(v => Math.min(100, Math.max(0, v))),
           borderColor: '#FB923C',
           backgroundColor: 'rgba(251,146,60,0.1)',
           tension: 0.4,
@@ -486,7 +493,7 @@ export default function Scorecard() {
             <AlertTriangle size={16} /> Performance Alerts ({alerts.length})
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {alerts.map(alert => (
+            {(showAllAlerts ? alerts : alerts.slice(0, 4)).map(alert => (
               <div
                 key={alert.id}
                 className={`glass-card p-3 flex items-start gap-3 cursor-pointer hover:border-[var(--${alert.severity === 'high' ? 'red' : 'orange'})]`}
@@ -514,6 +521,19 @@ export default function Scorecard() {
               </div>
             ))}
           </div>
+          {alerts.length > 4 && (
+            <button
+              className="mt-3 w-full text-xs font-medium py-2 rounded-xl transition-colors"
+              style={{
+                color: 'var(--primary)',
+                background: 'rgba(96,165,250,0.08)',
+                border: '1px solid rgba(96,165,250,0.2)',
+              }}
+              onClick={() => setShowAllAlerts(v => !v)}
+            >
+              {showAllAlerts ? `Show less ↑` : `See ${alerts.length - 4} more alerts ↓`}
+            </button>
+          )}
         </div>
       )}
 
@@ -802,10 +822,10 @@ function DrawerContent({
         <div>
           <h4 className="text-xs font-semibold uppercase mb-2" style={{ color: 'var(--text-muted)' }}>Ratings Summary</h4>
           <div className="glass-card p-4 grid grid-cols-2 gap-3">
-            <RatingBar label="Quality" value={rating.quality} max={5} />
-            <RatingBar label="Delivery" value={rating.delivery} max={5} />
-            <RatingBar label="Cost" value={rating.cost} max={5} />
-            <RatingBar label="Responsiveness" value={rating.responsiveness} max={5} />
+            <RatingBar label="Quality" value={rating.quality} max={100} />
+            <RatingBar label="Delivery" value={rating.delivery} max={100} />
+            <RatingBar label="Cost" value={rating.cost} max={100} />
+            <RatingBar label="Responsiveness" value={rating.responsiveness ?? rating.overall} max={100} />
           </div>
         </div>
       )}
@@ -830,10 +850,10 @@ function DrawerContent({
                 scales: {
                   x: { ticks: { color: '#94A3B8' }, grid: { display: false } },
                   y: {
-                    ticks: { color: '#94A3B8', stepSize: 1 },
+                    ticks: { color: '#94A3B8', stepSize: 20 },
                     grid: { color: 'rgba(148,197,255,0.08)' },
                     min: 0,
-                    max: 5,
+                    max: 100,
                   },
                 },
               }}
