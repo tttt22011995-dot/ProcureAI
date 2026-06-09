@@ -311,12 +311,12 @@ export default function Vendors() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div data-tour="vendors-header" className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold" style={{ color: 'var(--text)' }}>Vendors</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Manage supplier relationships and performance</p>
         </div>
-        <button className="glass-button glass-button-primary flex items-center gap-2" onClick={openCreateModal}>
+        <button data-tour="add-vendor-btn" className="glass-button glass-button-primary flex items-center gap-2" onClick={openCreateModal}>
           <Plus size={16} /> Add Vendor
         </button>
       </div>
@@ -370,7 +370,7 @@ export default function Vendors() {
       })()}
 
       {/* Vendor Cards */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div data-tour="vendor-list" className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {filtered.map(vendor => {
           const isExpanded = expandedId === vendor.id;
           const isCompareSelected = compareIds.has(vendor.id);
