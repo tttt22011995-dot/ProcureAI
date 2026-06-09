@@ -676,6 +676,7 @@ export default function Delivery() {
 
       {/* PO Cards Grid */}
       <div data-tour="delivery-list" className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {filteredAndSorted.map((po) => {
           const status = po.deliveryStatus || 'ordered';
           const isOverduePO = isOverdueStatus(status, po.deliveryDate);
           const overdueDays = isOverduePO ? getOverdueDays(po.deliveryDate) : 0;
@@ -888,3 +889,4 @@ function StatusBadge({
     </button>
   );
 }
+
