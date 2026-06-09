@@ -219,15 +219,14 @@ export default function Dashboard() {
   const overdueCount = pos.filter(p => isOverdue(p)).length;
   const avgScore = useMemo(() => {
     if (!ratings.length) return 0;
-    return Math.round((ratings.reduce((s, r) => s + r.overall, 0) / ratings.length) * 20);
+    return Math.round(ratings.reduce((s, r) => s + r.overall, 0) / ratings.length);
   }, [ratings]);
 
   const vendorTrend: 'up' | 'down' | 'stable' = useMemo(() => {
-    const trends = ratings.map(r => r.trend);
-    const ups = trends.filter(t => t === 'up').length;
-    const downs = trends.filter(t => t === 'down').length;
-    if (ups > downs) return 'up';
-    if (downs > ups) return 'down';
+    if (!ratings.length) return 'stable';
+    const avgOverall = ratings.reduce((s, r) => s + r.overall, 0) / ratings.length;
+    if (avgOverall >= 80) return 'up';
+    if (avgOverall < 65) return 'down';
     return 'stable';
   }, [ratings]);
 
