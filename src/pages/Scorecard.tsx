@@ -441,7 +441,7 @@ export default function Scorecard() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
+      <div data-tour="scorecard-header">
         <h1 className="text-2xl font-bold" style={{ color: 'var(--text)' }}>Vendor Performance Scorecard</h1>
         <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Comprehensive supplier performance analysis and benchmarking</p>
       </div>
@@ -589,7 +589,7 @@ export default function Scorecard() {
       </div>
 
       {/* Leaderboard */}
-      <div className="glass-card-solid p-5 overflow-hidden">
+      <div data-tour="scorecard-list" className="glass-card-solid p-5 overflow-hidden">
         <h3 className="text-sm font-semibold mb-4 flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
           <Award size={16} style={{ color: 'var(--blue)' }} /> Vendor Performance Leaderboard
         </h3>
