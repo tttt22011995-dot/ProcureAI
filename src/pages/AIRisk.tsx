@@ -610,7 +610,7 @@ export default function AIRisk() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div data-tour="ai-risk-header" className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2" style={{ color: 'var(--text)' }}>
             <ShieldAlert size={24} style={{ color: 'var(--red)' }} /> AI Risk Intelligence
