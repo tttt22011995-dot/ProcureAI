@@ -31,11 +31,11 @@ interface SidebarProps {
 const navItems: { page: Page; label: string; icon: React.ElementType }[] = [
   { page: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { page: 'vendors', label: 'Vendors', icon: Users },
+  { page: 'catalog', label: 'Catalog', icon: Package },
   { page: 'purchase-orders', label: 'Purchase Orders', icon: FileText },
   { page: 'delivery', label: 'Delivery', icon: Truck },
   { page: 'scorecard', label: 'Scorecard', icon: BarChart3 },
   { page: 'ai-risk', label: 'AI Risk', icon: ShieldAlert },
-  { page: 'catalog', label: 'Catalog', icon: Package },
 ];
 
 const alertIcon: Record<string, React.ElementType> = {
