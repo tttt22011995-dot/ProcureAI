@@ -1,45 +1,177 @@
-import { useState, useMemo } from 'react';
-import { Search, Plus, Clock, CheckCircle2, Truck, XCircle, FileEdit, ChevronDown, ChevronUp } from 'lucide-react';
-import { getPurchaseOrders, type PurchaseOrder } from '../lib/data';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import {
+  Search, Plus, Eye, Pencil, Copy, Trash2, X, Printer,
+  ChevronDown, ChevronUp, ArrowUp, ArrowDown, AlertTriangle,
+} from 'lucide-react';
+import {
+  getPurchaseOrders,
+  setPurchaseOrders,
+  getVendors,
+  nextPONumber,
+  CATALOG_ITEMS,
+  type PurchaseOrder,
+  type LineItem,
+  type Vendor,
+} from '../lib/data';
+import { poStatusColorMap } from '../lib/data';
 
-const statusIcon: Record<string, React.ElementType> = {
-  draft: FileEdit,
-  pending: Clock,
-  approved: CheckCircle2,
-  shipped: Truck,
-  delivered: CheckCircle2,
-  cancelled: XCircle,
+// ─── Constants ───
+
+const TAX_RATE = 0.1;
+
+const STATUSES: PurchaseOrder['status'][] = ['draft', 'pending', 'approved', 'shipped', 'delivered', 'cancelled'];
+
+const STATUS_COLORS: Record<string, string> = {
+  ...poStatusColorMap,
+  ordered: 'blue',
 };
 
-const statusColor: Record<string, string> = {
-  draft: 'purple',
-  pending: 'orange',
-  approved: 'cyan',
-  shipped: 'blue',
-  delivered: 'green',
-  cancelled: 'red',
-};
+const SORT_OPTIONS = [
+  { value: 'date-desc', label: 'Date (newest)' },
+  { value: 'date-asc', label: 'Date (oldest)' },
+  { value: 'total-desc', label: 'Total (high to low)' },
+  { value: 'total-asc', label: 'Total (low to high)' },
+  { value: 'status', label: 'Status' },
+];
 
-const priorityColor: Record<string, string> = {
-  low: 'blue',
-  medium: 'orange',
-  high: 'red',
-  critical: 'red',
-};
+// ─── Helpers ───
+
+function generateLineItemId(): string {
+  return `li_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function emptyLineItem(): LineItem {
+  return { id: generateLineItemId(), name: '', quantity: 1, unitPrice: 0, total: 0 };
+}
+
+function calculateLineTotal(qty: number, price: number): number {
+  return Math.round(qty * price * 100) / 100;
+}
+
+function calculateSubtotal(items: LineItem[]): number {
+  return Math.round(items.reduce((sum, item) => sum + item.total, 0) * 100) / 100;
+}
+
+function calculateTax(subtotal: number): number {
+  return Math.round(subtotal * TAX_RATE * 100) / 100;
+}
+
+function calculateGrandTotal(subtotal: number, tax: number): number {
+  return Math.round((subtotal + tax) * 100) / 100;
+}
+
+// ─── Main Component ───
 
 export default function PurchaseOrders() {
-  const [pos] = useState<PurchaseOrder[]>(() => getPurchaseOrders());
+  const [pos, setPosState] = useState<PurchaseOrder[]>(() => getPurchaseOrders());
+  const vendors = useMemo(() => getVendors(), []);
+
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [filterVendor, setFilterVendor] = useState('all');
+  const [sortBy, setSortBy] = useState('date-desc');
+  const [flashId, setFlashId] = useState<string | null>(null);
 
-  const filtered = useMemo(() => {
-    return pos.filter(p => {
-      const matchSearch = p.id.toLowerCase().includes(search.toLowerCase()) || p.vendorName.toLowerCase().includes(search.toLowerCase());
-      const matchStatus = filterStatus === 'all' || p.status === filterStatus;
-      return matchSearch && matchStatus;
+  // Modal states
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingPO, setEditingPO] = useState<PurchaseOrder | null>(null);
+  const [viewingPO, setViewingPO] = useState<PurchaseOrder | null>(null);
+
+  // Form states
+  const [selectedVendorId, setSelectedVendorId] = useState<string>('');
+  const [deliveryDate, setDeliveryDate] = useState<string>('');
+  const [items, setItems] = useState<LineItem[]>([emptyLineItem()]);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const flashRef = useRef<HTMLDivElement | null>(null);
+
+  // Persist
+  const persist = useCallback((updated: PurchaseOrder[]) => {
+    setPosState(updated);
+    setPurchaseOrders(updated);
+  }, []);
+
+  // ─── Filtering & Sorting ───
+
+  const filteredAndSorted = useMemo(() => {
+    let result = [...pos];
+
+    // Search
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter(p =>
+        p.id.toLowerCase().includes(q) ||
+        p.vendorName.toLowerCase().includes(q) ||
+        p.items.some(i => i.name.toLowerCase().includes(q))
+      );
+    }
+
+    // Filter by status
+    if (filterStatus !== 'all') {
+      result = result.filter(p => p.status === filterStatus);
+    }
+
+    // Filter by vendor
+    if (filterVendor !== 'all') {
+      result = result.filter(p => p.vendorId === filterVendor);
+    }
+
+    // Sort
+    switch (sortBy) {
+      case 'date-desc':
+        result.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        break;
+      case 'date-asc':
+        result.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+        break;
+      case 'total-desc':
+        result.sort((a, b) => b.total - a.total);
+        break;
+      case 'total-asc':
+        result.sort((a, b) => a.total - b.total);
+        break;
+      case 'status':
+        result.sort((a, b) => a.status.localeCompare(b.status));
+        break;
+    }
+
+    return result;
+  }, [pos, search, filterStatus, filterVendor, sortBy]);
+
+  // ─── Stats ───
+
+  const stats = useMemo(() => {
+    const totalValue = pos.reduce((sum, p) => sum + p.total, 0);
+
+    // Most ordered vendor
+    const vendorCounts: Record<string, number> = {};
+    pos.forEach(p => {
+      vendorCounts[p.vendorId] = (vendorCounts[p.vendorId] || 0) + 1;
     });
-  }, [pos, search, filterStatus]);
+    const mostOrderedVendorId = Object.entries(vendorCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
+    const mostOrderedVendor = vendors.find(v => v.id === mostOrderedVendorId)?.name || 'N/A';
+
+    // Average PO value
+    const avgValue = pos.length > 0 ? Math.round(totalValue / pos.length) : 0;
+
+    // This month's total
+    const thisMonth = new Date();
+    const thisMonthStr = `${thisMonth.getFullYear()}-${String(thisMonth.getMonth() + 1).padStart(2, '0')}`;
+    const thisMonthTotal = pos
+      .filter(p => p.createdAt.startsWith(thisMonthStr))
+      .reduce((sum, p) => sum + p.total, 0);
+
+    return {
+      totalValue,
+      mostOrderedVendor,
+      avgValue,
+      thisMonthTotal,
+      showing: filteredAndSorted.length,
+      total: pos.length,
+    };
+  }, [pos, filteredAndSorted.length, vendors]);
+
+  // ─── Status counts ───
 
   const statusCounts = useMemo(() => {
     const map: Record<string, number> = {};
@@ -47,21 +179,241 @@ export default function PurchaseOrders() {
     return map;
   }, [pos]);
 
+  // ─── Modal Handlers ───
+
+  const openCreateModal = useCallback(() => {
+    if (vendors.length === 0) return;
+    setEditingPO(null);
+    setSelectedVendorId('');
+    setDeliveryDate('');
+    setItems([emptyLineItem()]);
+    setErrors({});
+    setModalOpen(true);
+  }, [vendors.length]);
+
+  const openEditModal = useCallback((po: PurchaseOrder) => {
+    setEditingPO(po);
+    setSelectedVendorId(po.vendorId);
+    setDeliveryDate(po.deliveryDate);
+    setItems(po.items.map(i => ({ ...i })));
+    setErrors({});
+    setModalOpen(true);
+  }, []);
+
+  const closeModal = useCallback(() => {
+    setModalOpen(false);
+    setEditingPO(null);
+    setSelectedVendorId('');
+    setDeliveryDate('');
+    setItems([emptyLineItem()]);
+    setErrors({});
+  }, []);
+
+  // ─── Form Validation ───
+
+  const validateForm = useCallback((): boolean => {
+    const e: Record<string, string> = {};
+
+    if (!selectedVendorId) {
+      e.vendor = 'Please select a vendor';
+    }
+
+    if (!deliveryDate) {
+      e.deliveryDate = 'Delivery date is required';
+    }
+
+    const validItems = items.filter(i => i.name.trim() && i.quantity > 0);
+    if (validItems.length === 0) {
+      e.items = 'At least one line item is required';
+    }
+
+    items.forEach((item, idx) => {
+      if (item.name.trim() && item.quantity <= 0) {
+        e[`qty-${idx}`] = 'Qty must be > 0';
+      }
+    });
+
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  }, [selectedVendorId, deliveryDate, items]);
+
+  // ─── Save PO ───
+
+  const handleSave = useCallback(() => {
+    if (!validateForm()) return;
+
+    const vendor = vendors.find(v => v.id === selectedVendorId);
+    if (!vendor) return;
+
+    const subtotal = calculateSubtotal(items);
+    const tax = calculateTax(subtotal);
+    const grandTotal = calculateGrandTotal(subtotal, tax);
+
+    if (editingPO) {
+      // Update existing
+      const updated = pos.map(p =>
+        p.id === editingPO.id
+          ? {
+              ...p,
+              vendorId: selectedVendorId,
+              vendorName: vendor.name,
+              items: items.filter(i => i.name.trim()),
+              total: grandTotal,
+              deliveryDate,
+            }
+          : p
+      );
+      persist(updated);
+      closeModal();
+    } else {
+      // Create new
+      const newPO: PurchaseOrder = {
+        id: nextPONumber(),
+        vendorId: selectedVendorId,
+        vendorName: vendor.name,
+        items: items.filter(i => i.name.trim()),
+        total: grandTotal,
+        status: 'draft',
+        createdAt: new Date().toISOString().split('T')[0],
+        deliveryDate,
+        priority: 'medium',
+      };
+      persist([newPO, ...pos]);
+      closeModal();
+    }
+  }, [validateForm, vendors, items, editingPO, selectedVendorId, deliveryDate, pos, persist, closeModal]);
+
+  // ─── Duplicate PO ───
+
+  const handleDuplicate = useCallback((po: PurchaseOrder) => {
+    const newPO: PurchaseOrder = {
+      ...po,
+      id: nextPONumber(),
+      status: 'ordered',
+      createdAt: new Date().toISOString().split('T')[0],
+      items: po.items.map(i => ({ ...i, id: generateLineItemId() })),
+    };
+    persist([newPO, ...pos]);
+
+    // Flash effect
+    setFlashId(newPO.id);
+    setTimeout(() => {
+      flashRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+    setTimeout(() => setFlashId(null), 2000);
+  }, [pos, persist]);
+
+  // ─── Delete PO ───
+
+  const handleDelete = useCallback((poId: string) => {
+    if (!window.confirm('Are you sure you want to delete this purchase order?')) return;
+    persist(pos.filter(p => p.id !== poId));
+  }, [pos, persist]);
+
+  // ─── Line Items ───
+
+  const updateItem = useCallback((idx: number, field: keyof LineItem, value: string | number) => {
+    setItems(prev => {
+      const next = [...prev];
+      const item = { ...next[idx] };
+
+      if (field === 'name') {
+        item.name = value as string;
+      } else if (field === 'quantity') {
+        item.quantity = Math.max(0, parseInt(String(value), 10) || 0);
+      } else if (field === 'unitPrice') {
+        item.unitPrice = Math.max(0, parseFloat(String(value)) || 0);
+      }
+
+      item.total = calculateLineTotal(item.quantity, item.unitPrice);
+      next[idx] = item;
+      return next;
+    });
+  }, []);
+
+  const addItem = useCallback(() => {
+    setItems(prev => [...prev, emptyLineItem()]);
+  }, []);
+
+  const removeItem = useCallback((idx: number) => {
+    setItems(prev => {
+      if (prev.length === 1) {
+        // Clear the only row instead of removing
+        return [emptyLineItem()];
+      }
+      return prev.filter((_, i) => i !== idx);
+    });
+  }, []);
+
+  // ─── Subtotals ───
+
+  const subtotal = useMemo(() => calculateSubtotal(items), [items]);
+  const tax = useMemo(() => calculateTax(subtotal), [subtotal]);
+  const grandTotal = useMemo(() => calculateGrandTotal(subtotal, tax), [subtotal, tax]);
+
+  // ─── Flash effect cleanup ───
+
+  useEffect(() => {
+    if (flashId) {
+      const timer = setTimeout(() => setFlashId(null), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [flashId]);
+
+  // ─── Render ───
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold" style={{ color: 'var(--text)' }}>Purchase Orders</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Track and manage procurement orders</p>
         </div>
-        <button className="glass-button glass-button-primary flex items-center gap-2">
+        <button
+          className="glass-button glass-button-primary flex items-center gap-2"
+          onClick={openCreateModal}
+          disabled={vendors.length === 0}
+        >
           <Plus size={16} /> New PO
         </button>
+        {vendors.length === 0 && (
+          <div className="text-xs" style={{ color: 'var(--orange)' }}>
+            Please add vendors first
+          </div>
+        )}
       </div>
 
-      {/* Status pills */}
-      <div className="flex flex-wrap gap-2 items-center">
-        <div className="relative flex-1 min-w-[220px]">
+      {/* Stats Bar */}
+      <div className="glass-card-solid p-4 flex items-center justify-between flex-wrap gap-3">
+        <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          Showing <span style={{ color: 'var(--text)' }}>{stats.showing}</span> of{' '}
+          <span style={{ color: 'var(--text)' }}>{stats.total}</span> POs
+        </div>
+        <div className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
+          Total Value: <span style={{ color: 'var(--blue)' }}>${stats.totalValue.toLocaleString()}</span>
+        </div>
+      </div>
+
+      {/* Stats Panel */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="glass-card p-4">
+          <div className="text-xs font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>Most Ordered Vendor</div>
+          <div className="text-lg font-bold mt-1" style={{ color: 'var(--text)' }}>{stats.mostOrderedVendor}</div>
+        </div>
+        <div className="glass-card p-4">
+          <div className="text-xs font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>Average PO Value</div>
+          <div className="text-lg font-bold mt-1" style={{ color: 'var(--blue)' }}>${stats.avgValue.toLocaleString()}</div>
+        </div>
+        <div className="glass-card p-4">
+          <div className="text-xs font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>This Month's Total Spend</div>
+          <div className="text-lg font-bold mt-1" style={{ color: 'var(--text)' }}>${stats.thisMonthTotal.toLocaleString()}</div>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3 items-center">
+        <div className="relative flex-1 min-w-[200px]">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
           <input
             className="glass-input w-full pl-9"
@@ -70,6 +422,42 @@ export default function PurchaseOrders() {
             onChange={e => setSearch(e.target.value)}
           />
         </div>
+
+        <select
+          className="glass-input text-xs py-1.5 px-2"
+          value={filterStatus}
+          onChange={e => setFilterStatus(e.target.value)}
+        >
+          <option value="all">All Statuses</option>
+          {STATUSES.map(s => (
+            <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1).replace('-', ' ')}</option>
+          ))}
+        </select>
+
+        <select
+          className="glass-input text-xs py-1.5 px-2"
+          value={filterVendor}
+          onChange={e => setFilterVendor(e.target.value)}
+        >
+          <option value="all">All Vendors</option>
+          {vendors.map(v => (
+            <option key={v.id} value={v.id}>{v.name}</option>
+          ))}
+        </select>
+
+        <select
+          className="glass-input text-xs py-1.5 px-2"
+          value={sortBy}
+          onChange={e => setSortBy(e.target.value)}
+        >
+          {SORT_OPTIONS.map(opt => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Status pills */}
+      <div className="flex flex-wrap gap-2 items-center">
         <button
           className={`glass-button text-xs ${filterStatus === 'all' ? 'glass-button-primary' : ''}`}
           onClick={() => setFilterStatus('all')}
@@ -87,86 +475,650 @@ export default function PurchaseOrders() {
         ))}
       </div>
 
-      {/* PO Cards */}
-      <div className="space-y-3">
-        {filtered.map(po => {
-          const Icon = statusIcon[po.status] || Clock;
-          const isExpanded = expanded === po.id;
-          return (
-            <div key={po.id} className="glass-card-solid overflow-hidden">
-              <div
-                className="flex items-center gap-4 p-5 cursor-pointer"
-                onClick={() => setExpanded(isExpanded ? null : po.id)}
-              >
-                <div
-                  className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                  style={{ background: `var(--${statusColor[po.status]})`, opacity: 0.15, color: `var(--${statusColor[po.status]})` }}
-                >
-                  <Icon size={18} />
+      {/* PO Table */}
+      <div className="glass-card-solid overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="glass-table">
+            <thead>
+              <tr>
+                <th>PO Number</th>
+                <th>Vendor</th>
+                <th>Date</th>
+                <th>Items</th>
+                <th>Grand Total</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredAndSorted.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="text-center py-8" style={{ color: 'var(--text-muted)' }}>
+                    No purchase orders found
+                  </td>
+                </tr>
+              ) : (
+                filteredAndSorted.map(po => {
+                  const isFlashing = flashId === po.id;
+                  return (
+                    <tr
+                      key={po.id}
+                      ref={isFlashing ? flashRef : undefined}
+                      style={{
+                        background: isFlashing ? 'rgba(96,165,250,0.15)' : undefined,
+                        transition: 'background 0.3s',
+                      }}
+                    >
+                      <td className="font-mono font-medium" style={{ color: 'var(--text)' }}>{po.id}</td>
+                      <td style={{ color: 'var(--text-secondary)' }}>{po.vendorName}</td>
+                      <td style={{ color: 'var(--text-muted)' }}>{po.createdAt}</td>
+                      <td style={{ color: 'var(--text-secondary)', whiteSpace: 'normal', wordBreak: 'break-word', maxWidth: '240px' }}>
+                        {po.items.map(i => i.name).join(', ')}
+                      </td>
+                      <td className="font-semibold" style={{ color: 'var(--text)' }}>${po.total.toLocaleString()}</td>
+                      <td>
+                        <span className={`glass-badge glass-badge-${STATUS_COLORS[po.status] ?? 'blue'}`}>
+                          {po.status}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="flex items-center gap-1">
+                          <button
+                            className="p-1.5 rounded-lg transition-colors hover:bg-[rgba(96,165,250,0.1)]"
+                            style={{ color: 'var(--text-muted)' }}
+                            onClick={() => setViewingPO(po)}
+                            title="View"
+                          >
+                            <Eye size={16} />
+                          </button>
+                          <button
+                            className="p-1.5 rounded-lg transition-colors hover:bg-[rgba(96,165,250,0.1)]"
+                            style={{ color: 'var(--blue)' }}
+                            onClick={() => openEditModal(po)}
+                            title="Edit"
+                          >
+                            <Pencil size={16} />
+                          </button>
+                          <button
+                            className="p-1.5 rounded-lg transition-colors hover:bg-[rgba(96,165,250,0.1)]"
+                            style={{ color: 'var(--cyan)' }}
+                            onClick={() => handleDuplicate(po)}
+                            title="Duplicate"
+                          >
+                            <Copy size={16} />
+                          </button>
+                          <button
+                            className="p-1.5 rounded-lg transition-colors hover:bg-[rgba(251,113,133,0.1)]"
+                            style={{ color: 'var(--red)' }}
+                            onClick={() => handleDelete(po.id)}
+                            title="Delete"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ─── Create/Edit Modal ─── */}
+      {modalOpen && (
+        <Modal onClose={closeModal}>
+          <div className="glass-panel p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto" style={{ borderRadius: 24 }}>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>
+                {editingPO ? `Editing ${editingPO.id}` : 'Create New Purchase Order'}
+              </h2>
+              <button onClick={closeModal} style={{ color: 'var(--text-muted)' }}><X size={18} /></button>
+            </div>
+
+            {vendors.length === 0 ? (
+              <div className="text-center py-8" style={{ color: 'var(--text-muted)' }}>
+                Please add vendors first
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {/* PO Number (readonly) */}
+                <div>
+                  <label className="text-xs font-semibold uppercase block mb-1" style={{ color: 'var(--text-muted)' }}>
+                    PO Number
+                  </label>
+                  <input
+                    className="glass-input w-full bg-[rgba(0,0,0,0.05)]"
+                    value={editingPO?.id || nextPONumber()}
+                    disabled
+                  />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold" style={{ color: 'var(--text)' }}>{po.id}</span>
-                    <span className={`glass-badge glass-badge-${priorityColor[po.priority]}`}>
-                      {po.priority}
+
+                {/* Vendor Combobox */}
+                <div>
+                  <label className="text-xs font-semibold uppercase block mb-1" style={{ color: 'var(--text-muted)' }}>
+                    Vendor *
+                  </label>
+                  <VendorCombobox
+                    vendors={vendors}
+                    value={selectedVendorId}
+                    onChange={setSelectedVendorId}
+                    error={errors.vendor}
+                  />
+                </div>
+
+                {/* Delivery Date */}
+                <div>
+                  <label className="text-xs font-semibold uppercase block mb-1" style={{ color: 'var(--text-muted)' }}>
+                    Expected Delivery Date *
+                  </label>
+                  <input
+                    type="date"
+                    className={`glass-input w-full ${errors.deliveryDate ? 'border-[var(--red)]' : ''}`}
+                    style={errors.deliveryDate ? { borderColor: 'var(--red)' } : undefined}
+                    value={deliveryDate}
+                    onChange={e => setDeliveryDate(e.target.value)}
+                  />
+                  {errors.deliveryDate && (
+                    <div className="text-xs mt-1" style={{ color: 'var(--red)' }}>{errors.deliveryDate}</div>
+                  )}
+                </div>
+
+                {/* Line Items */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-xs font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>
+                      Line Items
+                    </label>
+                    <button
+                      className="glass-button text-xs py-1 px-3 flex items-center gap-1"
+                      onClick={addItem}
+                    >
+                      <Plus size={12} /> Add Item
+                    </button>
+                  </div>
+
+                  {errors.items && (
+                    <div className="text-xs mb-2" style={{ color: 'var(--red)' }}>{errors.items}</div>
+                  )}
+
+                  <div className="space-y-2">
+                    {items.map((item, idx) => (
+                      <LineItemRow
+                        key={item.id}
+                        item={item}
+                        idx={idx}
+                        isLast={idx === items.length - 1}
+                        updateItem={updateItem}
+                        removeItem={removeItem}
+                        addItem={addItem}
+                        error={errors[`qty-${idx}`]}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Summary */}
+                <div className="glass-card-solid p-4">
+                  <div className="flex items-center justify-between text-sm mb-2">
+                    <span style={{ color: 'var(--text-muted)' }}>Subtotal</span>
+                    <span style={{ color: 'var(--text)' }}>${subtotal.toLocaleString()}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm mb-2">
+                    <span style={{ color: 'var(--text-muted)' }}>Tax (10%)</span>
+                    <span style={{ color: 'var(--text)' }}>${tax.toLocaleString()}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-lg font-bold pt-2" style={{ borderTop: '1px solid var(--glass-border)' }}>
+                    <span style={{ color: 'var(--text)' }}>Grand Total</span>
+                    <span style={{ color: 'var(--blue)' }}>${grandTotal.toLocaleString()}</span>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center justify-end gap-3 pt-2">
+                  <button className="glass-button" onClick={closeModal}>Cancel</button>
+                  <button className="glass-button glass-button-primary" onClick={handleSave}>
+                    {editingPO ? 'Save Changes' : 'Create PO'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {/* ─── View/Print Modal ─── */}
+      {viewingPO && (
+        <Modal onClose={() => setViewingPO(null)}>
+          <div className="glass-panel p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto print-area" style={{ borderRadius: 24 }}>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>Purchase Order: {viewingPO.id}</h2>
+              <div className="flex items-center gap-2">
+                <button
+                  className="glass-button glass-button-primary flex items-center gap-2"
+                  onClick={() => printPO(viewingPO)}
+                >
+                  <Printer size={14} /> Print
+                </button>
+                <button onClick={() => setViewingPO(null)} style={{ color: 'var(--text-muted)' }}><X size={18} /></button>
+              </div>
+            </div>
+
+            {/* PO Document */}
+            <div className="space-y-6">
+              {/* Header */}
+              <div className="text-center pb-4" style={{ borderBottom: '1px solid var(--glass-border)' }}>
+                <div className="text-2xl font-bold" style={{ color: 'var(--text)' }}>ProcureAI</div>
+                <div className="text-sm" style={{ color: 'var(--text-muted)' }}>Supply Chain Management</div>
+              </div>
+
+              {/* PO Info */}
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <div className="text-xs font-semibold uppercase mb-1" style={{ color: 'var(--text-muted)' }}>Vendor</div>
+                  <div className="font-semibold" style={{ color: 'var(--text)' }}>{viewingPO.vendorName}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs font-semibold uppercase mb-1" style={{ color: 'var(--text-muted)' }}>PO Number</div>
+                  <div className="font-mono font-bold" style={{ color: 'var(--text)' }}>{viewingPO.id}</div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <div className="text-xs font-semibold uppercase mb-1" style={{ color: 'var(--text-muted)' }}>Order Date</div>
+                  <div style={{ color: 'var(--text-secondary)' }}>{viewingPO.createdAt}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs font-semibold uppercase mb-1" style={{ color: 'var(--text-muted)' }}>Expected Delivery</div>
+                  <div style={{ color: 'var(--text-secondary)' }}>{viewingPO.deliveryDate}</div>
+                </div>
+              </div>
+
+              {/* Line Items */}
+              <div>
+                <table className="glass-table">
+                  <thead>
+                    <tr>
+                      <th>Item</th>
+                      <th>Qty</th>
+                      <th>Unit Price</th>
+                      <th>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {viewingPO.items.map(item => (
+                      <tr key={item.id}>
+                        <td style={{ color: 'var(--text)' }}>{item.name}</td>
+                        <td>{item.quantity}</td>
+                        <td>${item.unitPrice.toLocaleString()}</td>
+                        <td style={{ color: 'var(--text)' }}>${item.total.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Totals */}
+              <div className="glass-card-solid p-4">
+                <div className="grid grid-cols-3 gap-4 text-sm">
+                  <div>
+                    <div className="text-xs font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>Subtotal</div>
+                    <div className="font-bold" style={{ color: 'var(--text)' }}>${viewingPO.total.toLocaleString()}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>Status</div>
+                    <span className={`glass-badge glass-badge-${STATUS_COLORS[viewingPO.status] ?? 'blue'}`}>
+                      {viewingPO.status}
                     </span>
                   </div>
-                  <div className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                    {po.vendorName} &middot; {po.items.length} item{po.items.length > 1 ? 's' : ''}
+                  <div className="text-right">
+                    <div className="text-xs font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>Grand Total</div>
+                    <div className="text-xl font-bold" style={{ color: 'var(--blue)' }}>${viewingPO.total.toLocaleString()}</div>
                   </div>
                 </div>
-                <div className="text-right flex-shrink-0">
-                  <div className="font-bold" style={{ color: 'var(--text)' }}>
-                    ${po.total.toLocaleString()}
-                  </div>
-                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                    Due {po.deliveryDate}
-                  </div>
-                </div>
-                <span className={`glass-badge glass-badge-${statusColor[po.status]}`}>
-                  {po.status}
-                </span>
-                {isExpanded ? <ChevronUp size={16} style={{ color: 'var(--text-muted)' }} /> : <ChevronDown size={16} style={{ color: 'var(--text-muted)' }} />}
               </div>
-              {isExpanded && (
-                <div className="px-5 pb-5 pt-0">
-                  <div
-                    className="overflow-x-auto"
-                    style={{ borderTop: '1px solid var(--glass-border)' }}
-                  >
-                    <table className="glass-table mt-3">
-                      <thead>
-                        <tr>
-                          <th>Item</th>
-                          <th>Qty</th>
-                          <th>Unit Price</th>
-                          <th>Total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {po.items.map(item => (
-                          <tr key={item.id}>
-                            <td style={{ color: 'var(--text)' }}>{item.name}</td>
-                            <td>{item.quantity}</td>
-                            <td>${item.unitPrice.toLocaleString()}</td>
-                            <td style={{ color: 'var(--text)' }}>${item.total.toLocaleString()}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    <div className="flex items-center justify-between mt-3 text-sm" style={{ color: 'var(--text-muted)' }}>
-                      <span>Created: {po.createdAt}</span>
-                      <span className="font-semibold" style={{ color: 'var(--text)' }}>
-                        Total: ${po.total.toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
+
+              {/* Footer */}
+              <div className="text-center text-xs pt-4" style={{ color: 'var(--text-muted)', borderTop: '1px solid var(--glass-border)' }}>
+                This is a computer-generated document. For questions, contact procurement@procureai.com
+              </div>
             </div>
-          );
-        })}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── Vendor Combobox ───
+
+function VendorCombobox({
+  vendors,
+  value,
+  onChange,
+  error,
+}: {
+  vendors: Vendor[];
+  value: string;
+  onChange: (id: string) => void;
+  error?: string;
+}) {
+  const [search, setSearch] = useState('');
+  const [open, setOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const selected = vendors.find(v => v.id === value);
+  const filtered = vendors.filter(v =>
+    v.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const handleSelect = (vendor: Vendor) => {
+    onChange(vendor.id);
+    setSearch('');
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative">
+      <div className="relative">
+        <input
+          ref={inputRef}
+          className={`glass-input w-full pr-10 ${error ? 'border-[var(--red)]' : ''}`}
+          style={error ? { borderColor: 'var(--red)' } : undefined}
+          placeholder="Select vendor..."
+          value={search || selected?.name || ''}
+          onChange={e => {
+            setSearch(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => {
+            // Delay to allow click on option
+            setTimeout(() => setOpen(false), 150);
+          }}
+        />
+        <ChevronDown
+          size={16}
+          className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer"
+          style={{ color: 'var(--text-muted)' }}
+          onMouseDown={e => {
+            e.preventDefault();
+            setOpen(o => !o);
+            inputRef.current?.focus();
+          }}
+        />
+      </div>
+
+      {error && <div className="text-xs mt-1" style={{ color: 'var(--red)' }}>{error}</div>}
+
+      {open && (
+        <div
+          ref={listRef}
+          className="absolute left-0 right-0 top-full mt-1 glass-panel z-20 max-h-[200px] overflow-y-auto"
+          style={{ borderRadius: 12 }}
+        >
+          {filtered.length === 0 ? (
+            <div className="px-4 py-3 text-sm" style={{ color: 'var(--text-muted)' }}>No vendors found</div>
+          ) : (
+            filtered.map(v => (
+              <div
+                key={v.id}
+                className="px-4 py-2.5 text-sm cursor-pointer transition-colors hover:bg-[rgba(96,165,250,0.08)]"
+                style={{ color: v.id === value ? 'var(--blue)' : 'var(--text-secondary)' }}
+                onMouseDown={() => handleSelect(v)}
+              >
+                {v.name}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Line Item Row ───
+
+function LineItemRow({
+  item,
+  idx,
+  isLast,
+  updateItem,
+  removeItem,
+  addItem,
+  error,
+}: {
+  item: LineItem;
+  idx: number;
+  isLast: boolean;
+  updateItem: (idx: number, field: keyof LineItem, value: string | number) => void;
+  removeItem: (idx: number) => void;
+  addItem: () => void;
+  error?: string;
+}) {
+  const [autocompleteOpen, setAutocompleteOpen] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const qtyInputRef = useRef<HTMLInputElement>(null);
+  const priceInputRef = useRef<HTMLInputElement>(null);
+
+  const matchingItems = CATALOG_ITEMS.filter(c =>
+    c.name.toLowerCase().includes(item.name.toLowerCase()) && item.name.length > 0
+  ).slice(0, 6);
+
+  const handleNameSelect = (catalogItem: typeof CATALOG_ITEMS[0]) => {
+    updateItem(idx, 'name', catalogItem.name);
+    updateItem(idx, 'unitPrice', catalogItem.unitPrice);
+    setAutocompleteOpen(false);
+    // Focus quantity after selecting
+    setTimeout(() => qtyInputRef.current?.focus(), 0);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent, field: string) => {
+    if (e.key === 'Tab' && !e.shiftKey) {
+      if (field === 'price' && isLast) {
+        e.preventDefault();
+        addItem();
+        setTimeout(() => {
+          const nameInputs = document.querySelectorAll('input[data-field="name"]');
+          (nameInputs[nameInputs.length - 1] as HTMLInputElement)?.focus();
+        }, 0);
+      } else if (field === 'name') {
+        // Tab from name focuses quantity
+        e.preventDefault();
+        qtyInputRef.current?.focus();
+      } else if (field === 'qty') {
+        // Tab from quantity focuses price
+        e.preventDefault();
+        priceInputRef.current?.focus();
+      }
+    }
+  };
+
+  return (
+    <div className="glass-card-solid p-3">
+      <div className="grid grid-cols-12 gap-3 items-center">
+        {/* Item Name with Autocomplete */}
+        <div className="col-span-5 relative">
+          <input
+            ref={nameInputRef}
+            data-field="name"
+            className="glass-input w-full"
+            placeholder="Item name..."
+            value={item.name}
+            onChange={e => {
+              updateItem(idx, 'name', e.target.value);
+              setAutocompleteOpen(true);
+            }}
+            onFocus={() => setAutocompleteOpen(true)}
+            onBlur={() => setTimeout(() => setAutocompleteOpen(false), 150)}
+            onKeyDown={e => handleKeyDown(e, 'name')}
+          />
+          {autocompleteOpen && matchingItems.length > 0 && (
+            <div className="absolute left-0 right-0 top-full mt-1 glass-panel z-10 max-h-[160px] overflow-y-auto" style={{ borderRadius: 10 }}>
+              {matchingItems.map((c, i) => (
+                <div
+                  key={i}
+                  className="px-3 py-2 text-sm cursor-pointer transition-colors hover:bg-[rgba(96,165,250,0.08)]"
+                  style={{ color: 'var(--text-secondary)' }}
+                  onMouseDown={() => handleNameSelect(c)}
+                >
+                  {c.name} <span style={{ color: 'var(--text-muted)' }}>${c.unitPrice}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Quantity */}
+        <div className="col-span-2">
+          <input
+            ref={qtyInputRef}
+            type="number"
+            min={0}
+            className={`glass-input w-full ${error ? '' : ''}`}
+            style={error ? { borderColor: 'var(--red)' } : undefined}
+            placeholder="Qty"
+            value={item.quantity || ''}
+            onChange={e => updateItem(idx, 'quantity', e.target.value)}
+            onKeyDown={e => handleKeyDown(e, 'qty')}
+          />
+          {error && <div className="text-xs mt-0.5" style={{ color: 'var(--red)' }}>{error}</div>}
+        </div>
+
+        {/* Unit Price */}
+        <div className="col-span-2">
+          <input
+            ref={priceInputRef}
+            type="number"
+            min={0}
+            step="0.01"
+            className="glass-input w-full"
+            placeholder="Price"
+            value={item.unitPrice || ''}
+            onChange={e => updateItem(idx, 'unitPrice', e.target.value)}
+            onKeyDown={e => handleKeyDown(e, 'price')}
+          />
+        </div>
+
+        {/* Line Total */}
+        <div className="col-span-2 text-right">
+          <span className="font-semibold" style={{ color: 'var(--text)' }}>
+            ${item.total.toLocaleString()}
+          </span>
+        </div>
+
+        {/* Delete */}
+        <div className="col-span-1 flex justify-center">
+          <button
+            className="p-1.5 rounded-lg transition-colors hover:bg-[rgba(251,113,133,0.1)]"
+            style={{ color: 'var(--red)' }}
+            onClick={() => removeItem(idx)}
+          >
+            <X size={14} />
+          </button>
+        </div>
       </div>
     </div>
   );
+}
+
+// ─── Modal Wrapper ───
+
+function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.4)' }}
+      onClick={e => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+// ─── Print Helper ───
+
+function printPO(po: PurchaseOrder) {
+  const printArea = document.querySelector('.print-area');
+  if (!printArea) return;
+
+  const printRoot = document.createElement('div');
+  printRoot.id = 'po-print-root';
+  printRoot.style.cssText = 'position:fixed;left:0;top:0;width:100%;background:#fff;z-index:9999;padding:40px;';
+  printRoot.innerHTML = `
+    <div style="font-family:Inter,system-ui,sans-serif;max-width:800px;margin:0 auto;">
+      <div style="text-align:center;margin-bottom:32px;">
+        <div style="font-size:32px;font-weight:700;color:#0F172A;">ProcureAI</div>
+        <div style="font-size:14px;color:#64748B;">Supply Chain Management</div>
+      </div>
+      <div style="border-top:2px solid #E2E8F0;padding-top:24px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:24px;">
+          <div>
+            <div style="font-size:12px;font-weight:600;text-transform:uppercase;color:#64748B;margin-bottom:4px;">Vendor</div>
+            <div style="font-size:18px;font-weight:600;color:#0F172A;">${po.vendorName}</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:12px;font-weight:600;text-transform:uppercase;color:#64748B;margin-bottom:4px;">PO Number</div>
+            <div style="font-size:18px;font-weight:700;color:#2563EB;">${po.id}</div>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:24px;">
+          <div>
+            <div style="font-size:12px;font-weight:600;text-transform:uppercase;color:#64748B;margin-bottom:4px;">Order Date</div>
+            <div style="color:#334155;">${po.createdAt}</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:12px;font-weight:600;text-transform:uppercase;color:#64748B;margin-bottom:4px;">Expected Delivery</div>
+            <div style="color:#334155;">${po.deliveryDate}</div>
+          </div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
+          <thead>
+            <tr style="background:#F1F5F9;">
+              <th style="padding:12px;text-align:left;font-size:12px;font-weight:600;text-transform:uppercase;color:#64748B;border-bottom:2px solid #E2E8F0;">Item</th>
+              <th style="padding:12px;text-align:right;font-size:12px;font-weight:600;text-transform:uppercase;color:#64748B;border-bottom:2px solid #E2E8F0;">Qty</th>
+              <th style="padding:12px;text-align:right;font-size:12px;font-weight:600;text-transform:uppercase;color:#64748B;border-bottom:2px solid #E2E8F0;">Unit Price</th>
+              <th style="padding:12px;text-align:right;font-size:12px;font-weight:600;text-transform:uppercase;color:#64748B;border-bottom:2px solid #E2E8F0;">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${po.items.map(item => `
+              <tr>
+                <td style="padding:12px;border-bottom:1px solid #E2E8F0;color:#0F172A;">${item.name}</td>
+                <td style="padding:12px;text-align:right;border-bottom:1px solid #E2E8F0;color:#334155;">${item.quantity}</td>
+                <td style="padding:12px;text-align:right;border-bottom:1px solid #E2E8F0;color:#334155;">$${item.unitPrice.toLocaleString()}</td>
+                <td style="padding:12px;text-align:right;border-bottom:1px solid #E2E8F0;color:#0F172A;font-weight:600;">$${item.total.toLocaleString()}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        <div style="display:flex;justify-content:flex-end;margin-bottom:24px;">
+          <div style="text-align:right;">
+            <div style="font-size:14px;color:#64748B;margin-bottom:4px;">Subtotal: $${po.total.toLocaleString()}</div>
+            <div style="font-size:24px;font-weight:700;color:#2563EB;">Total: $${po.total.toLocaleString()}</div>
+          </div>
+        </div>
+        <div style="text-align:center;font-size:12px;color:#94A3B8;padding-top:24px;border-top:2px solid #E2E8F0;">
+          This is a computer-generated document. For questions, contact procurement@procureai.com
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(printRoot);
+  const rootEl = document.getElementById('root');
+  if (rootEl) rootEl.style.display = 'none';
+
+  setTimeout(() => {
+    window.print();
+    setTimeout(() => {
+      printRoot.remove();
+      if (rootEl) rootEl.style.display = '';
+    }, 100);
+  }, 100);
 }

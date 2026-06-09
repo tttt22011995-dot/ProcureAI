@@ -111,6 +111,26 @@ export function nextVendorCode(): string {
   return `VND-${String(maxNum + 1).padStart(3, '0')}`;
 }
 
+export function nextPONumber(): string {
+  const pos = getPurchaseOrders();
+  const year = new Date().getFullYear();
+  const yearPOs = pos.filter(p => p.id.startsWith(`PO-${year}-`));
+  const maxNum = yearPOs.reduce((max, po) => {
+    const m = po.id.match(/PO-\d{4}-(\d+)/);
+    return m ? Math.max(max, parseInt(m[1], 10)) : max;
+  }, 0);
+  return `PO-${year}-${String(maxNum + 1).padStart(3, '0')}`;
+}
+
+export function setPurchaseOrderStatus(poId: string, status: PurchaseOrder['status']): void {
+  const pos = getPurchaseOrders();
+  const idx = pos.findIndex(p => p.id === poId);
+  if (idx !== -1) {
+    pos[idx] = { ...pos[idx], status };
+    setPurchaseOrders(pos);
+  }
+}
+
 export function getPOsByVendor(vendorId: string): PurchaseOrder[] {
   return getPurchaseOrders().filter(po => po.vendorId === vendorId);
 }
@@ -118,6 +138,46 @@ export function getPOsByVendor(vendorId: string): PurchaseOrder[] {
 export function getVendorRating(vendorId: string): VendorRating | undefined {
   return getVendorRatings().find(vr => vr.vendorId === vendorId);
 }
+
+// ─── Catalog Items ───
+
+export interface CatalogItem {
+  name: string;
+  unitPrice: number;
+}
+
+export const CATALOG_ITEMS: CatalogItem[] = [
+  { name: 'Steel Billets Grade A', unitPrice: 120 },
+  { name: 'Steel Billets Grade B', unitPrice: 95 },
+  { name: 'Aluminum Sheets 1mm', unitPrice: 65 },
+  { name: 'Aluminum Sheets 2mm', unitPrice: 85 },
+  { name: 'Aluminum Sheets 3mm', unitPrice: 105 },
+  { name: 'Copper Wire 8AWG', unitPrice: 12 },
+  { name: 'Copper Wire 12AWG', unitPrice: 8 },
+  { name: 'Titanium Rods 10mm', unitPrice: 280 },
+  { name: 'Titanium Rods 15mm', unitPrice: 340 },
+  { name: 'PCB Assembly Board X7', unitPrice: 340 },
+  { name: 'PCB Assembly Board X9', unitPrice: 420 },
+  { name: 'Corrugated Box L-12', unitPrice: 2.4 },
+  { name: 'Corrugated Box L-24', unitPrice: 3.8 },
+  { name: 'Shrink Wrap Roll 500m', unitPrice: 45 },
+  { name: 'Shrink Wrap Roll 1000m', unitPrice: 78 },
+  { name: 'Freight Service - East Coast', unitPrice: 15000 },
+  { name: 'Freight Service - West Coast', unitPrice: 18000 },
+  { name: 'Industrial Adhesive 5L', unitPrice: 125 },
+  { name: 'Safety Gloves Box/100', unitPrice: 45 },
+  { name: 'Nitrile Gloves Box/200', unitPrice: 38 },
+  { name: 'Steel Pipes 2-inch', unitPrice: 85 },
+  { name: 'PVC Pipes 4-inch', unitPrice: 22 },
+  { name: 'Electrical Cable 100m', unitPrice: 180 },
+  { name: 'LED Panel Light 60x60', unitPrice: 95 },
+  { name: 'Hydraulic Pump HP-200', unitPrice: 2400 },
+  { name: 'Bearing Set BS-100', unitPrice: 320 },
+  { name: 'Rubber Gasket Kit', unitPrice: 45 },
+  { name: 'Stainless Steel Bolts M8', unitPrice: 0.85 },
+  { name: 'Carbon Fiber Sheet 1m x 1m', unitPrice: 450 },
+  { name: 'Injection Molded Parts Kit', unitPrice: 180 },
+];
 
 // ─── Seed Data ───
 
