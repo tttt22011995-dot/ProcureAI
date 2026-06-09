@@ -119,6 +119,88 @@ export const priorityColorMap: Record<string, string> = {
   high: 'red',
 };
 
+// ─── Business logic helpers ───
+
+export function isOverdue(po: PurchaseOrder): boolean {
+  const deliveryStatus = po.deliveryStatus ?? po.status;
+  if (deliveryStatus === 'delivered' || deliveryStatus === 'invoiced') return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const expected = new Date(po.deliveryDate);
+  expected.setHours(0, 0, 0, 0);
+  return expected < today;
+}
+
+export function getEffectivePOStatus(po: PurchaseOrder): string {
+  if (isOverdue(po)) return 'overdue';
+  return po.status;
+}
+
+export function formatDate(dateStr: string): string {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+export function formatCurrency(amount: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency', currency: 'USD', minimumFractionDigits: 0,
+  }).format(amount);
+}
+
+export interface AlertItem {
+  id: string;
+  type: 'overdue' | 'low-score' | 'stuck';
+  message: string;
+  page: Page;
+}
+
+export function computeAlerts(): AlertItem[] {
+  const alerts: AlertItem[] = [];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Use cached data — populated after fetchVendors/fetchPurchaseOrders/fetchVendorRatings
+  const pos: PurchaseOrder[] = (window as any).__procureai_pos_cache ?? [];
+  const ratings: VendorRating[] = (window as any).__procureai_ratings_cache ?? [];
+  const vendors: Vendor[] = (window as any).__procureai_vendors_cache ?? [];
+
+  pos.forEach(po => {
+    if (isOverdue(po)) {
+      alerts.push({
+        id: `overdue-${po.id}`,
+        type: 'overdue',
+        message: `${po.id} (${po.vendorName}) is overdue`,
+        page: 'delivery',
+      });
+    }
+    const created = new Date(po.createdAt);
+    const days = Math.floor((today.getTime() - created.getTime()) / 86400000);
+    if ((po.status === 'ordered' || po.status === 'confirmed') && days >= 7) {
+      alerts.push({
+        id: `stuck-${po.id}`,
+        type: 'stuck',
+        message: `${po.id} stuck in ${po.status} for ${days} days`,
+        page: 'purchase-orders',
+      });
+    }
+  });
+
+  ratings.forEach(r => {
+    if (r.overall < 60) {
+      const v = vendors.find(v => v.id === r.vendorId);
+      alerts.push({
+        id: `low-score-${r.vendorId}`,
+        type: 'low-score',
+        message: `${v?.name ?? r.vendorName} has low score (${r.overall}/100)`,
+        page: 'scorecard',
+      });
+    }
+  });
+
+  return alerts;
+}
+
 // ─── ID generators ───
 
 export function nextVendorId(vendors: Vendor[]): string {
@@ -333,7 +415,9 @@ export async function fetchVendors(): Promise<Vendor[]> {
     console.error('fetchVendors error:', error);
     return [];
   }
-  return (data ?? []).map(mapVendorRow);
+  const result = (data ?? []).map(mapVendorRow);
+  (window as any).__procureai_vendors_cache = result;
+  return result;
 }
 
 export async function upsertVendor(vendor: Vendor): Promise<boolean> {
@@ -367,7 +451,9 @@ export async function fetchPurchaseOrders(): Promise<PurchaseOrder[]> {
     console.error('fetchPurchaseOrders error:', error);
     return [];
   }
-  return (data ?? []).map(mapPORow);
+  const result = (data ?? []).map(mapPORow);
+  (window as any).__procureai_pos_cache = result;
+  return result;
 }
 
 export async function upsertPurchaseOrder(po: PurchaseOrder): Promise<boolean> {
@@ -401,7 +487,9 @@ export async function fetchVendorRatings(): Promise<VendorRating[]> {
     console.error('fetchVendorRatings error:', error);
     return [];
   }
-  return (data ?? []).map(mapRatingRow);
+  const result = (data ?? []).map(mapRatingRow);
+  (window as any).__procureai_ratings_cache = result;
+  return result;
 }
 
 export async function upsertVendorRating(rating: VendorRating): Promise<boolean> {
