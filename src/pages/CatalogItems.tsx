@@ -58,7 +58,7 @@ export default function CatalogItems() {
       setIsLoading(false);
     });
     return () => { cancelled = true; };
-  }, [<think>Key]);
+  }, [refreshKey]);
 
   // ─── Filtering & Sorting ───
 
