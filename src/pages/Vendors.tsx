@@ -370,7 +370,7 @@ export default function Vendors() {
       })()}
 
       {/* Vendor Cards */}
-      <div data-tour="vendor-list" className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div data-tour="vendor-list" className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         {filtered.map(vendor => {
           const isExpanded = expandedId === vendor.id;
           const isCompareSelected = compareIds.has(vendor.id);
