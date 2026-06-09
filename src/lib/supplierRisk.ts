@@ -86,7 +86,7 @@ function isOverduePO(po: PurchaseOrder): boolean {
 }
 
 function isOpenPO(po: PurchaseOrder): boolean {
-  const openStatuses = new Set(['draft', 'pending', 'approved', 'shipped']);
+  const openStatuses = new Set(['ordered', 'confirmed', 'in-transit']);
   return openStatuses.has(po.status) ||
          (po.deliveryStatus !== 'delivered' && po.deliveryStatus !== 'invoiced');
 }
