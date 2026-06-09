@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   Truck, Package, CheckCircle2, AlertTriangle, Search, ChevronUp, ChevronDown,
   FileText, MessageSquare, Calendar, Plus,
@@ -6,14 +6,15 @@ import {
 import { Bar } from 'react-chartjs-2';
 import '../lib/chartSetup';
 import {
-  getPurchaseOrders,
-  setPurchaseOrders,
-  getDeliveryPerformance,
-  setDeliveryPerformance,
+  fetchPurchaseOrders,
+  fetchDeliveryPerformance,
+  upsertPurchaseOrder,
+  upsertDeliveryPerformance,
   type PurchaseOrder,
   type DeliveryNote,
   type DeliveryPerformance,
 } from '../lib/data';
+import { useRefresh } from '../lib/RefreshContext';
 
 // ─── Constants ───
 
@@ -111,8 +112,10 @@ function getTodayStr(): string {
 // ─── Main Component ───
 
 export default function Delivery() {
-  const [pos, setPosState] = useState<PurchaseOrder[]>(() => getPurchaseOrders());
-  const [deliveryPerf, setDeliveryPerfState] = useState<DeliveryPerformance[]>(() => getDeliveryPerformance());
+  const { refreshKey, triggerRefresh } = useRefresh();
+  const [pos, setPosState] = useState<PurchaseOrder[]>([]);
+  const [deliveryPerf, setDeliveryPerfState] = useState<DeliveryPerformance[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState('earliest');
@@ -120,17 +123,15 @@ export default function Delivery() {
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
   const [newNoteText, setNewNoteText] = useState<Record<string, string>>({});
 
-  // ─── Persist functions ───
-
-  const persistPOs = useCallback((updated: PurchaseOrder[]) => {
-    setPosState(updated);
-    setPurchaseOrders(updated);
-  }, []);
-
-  const persistDeliveryPerf = useCallback((updated: DeliveryPerformance[]) => {
-    setDeliveryPerfState(updated);
-    setDeliveryPerformance(updated);
-  }, []);
+  useEffect(() => {
+    setIsLoading(true);
+    Promise.all([fetchPurchaseOrders(), fetchDeliveryPerformance()])
+      .then(([orders, perf]) => {
+        setPosState(orders);
+        setDeliveryPerfState(perf);
+      })
+      .finally(() => setIsLoading(false));
+  }, [refreshKey]);
 
   // ─── Computed values ───
 
@@ -226,7 +227,7 @@ export default function Delivery() {
 
   // ─── Status Transition Handlers ───
 
-  const handleAdvanceStatus = useCallback((po: PurchaseOrder) => {
+  const handleAdvanceStatus = useCallback(async (po: PurchaseOrder) => {
     const currentStatus = po.deliveryStatus || 'ordered';
     if (!canAdvance(currentStatus)) return;
 
@@ -235,27 +236,22 @@ export default function Delivery() {
 
     let actualDeliveryDate = po.actualDeliveryDate;
 
-    // Set actualDeliveryDate when first reaching delivered status
     if (nextStatus === 'delivered' && !actualDeliveryDate) {
       actualDeliveryDate = today;
     }
 
-    const updatedPOs = pos.map(p =>
-      p.id === po.id
-        ? { ...p, deliveryStatus: nextStatus, actualDeliveryDate }
-        : p
-    );
+    const updated = { ...po, deliveryStatus: nextStatus, actualDeliveryDate };
+    const success = await upsertPurchaseOrder(updated);
+    if (!success) return;
 
-    persistPOs(updatedPOs);
+    setPosState(prev => prev.map(p => p.id === po.id ? updated : p));
 
-    // Update deliveryPerformance when delivered/invoiced
     if ((nextStatus === 'delivered' || nextStatus === 'invoiced') && actualDeliveryDate) {
       const expected = new Date(po.deliveryDate);
       const actual = new Date(actualDeliveryDate);
       const daysDiff = daysBetween(actual, expected);
       const isOnTime = daysDiff >= 0;
 
-      const existingPerfs = deliveryPerf.filter(dp => dp.poId !== po.id);
       const newPerf: DeliveryPerformance = {
         id: `dp-${po.id}`,
         poId: po.id,
@@ -268,11 +264,17 @@ export default function Delivery() {
         onTime: isOnTime,
         daysDifference: daysDiff,
       };
-      persistDeliveryPerf([...existingPerfs, newPerf]);
+      await upsertDeliveryPerformance(newPerf);
+      setDeliveryPerfState(prev => {
+        const filtered = prev.filter(dp => dp.poId !== po.id);
+        return [...filtered, newPerf];
+      });
     }
-  }, [pos, deliveryPerf, persistPOs, persistDeliveryPerf]);
 
-  const handleRevertStatus = useCallback((po: PurchaseOrder) => {
+    triggerRefresh();
+  }, [triggerRefresh]);
+
+  const handleRevertStatus = useCallback(async (po: PurchaseOrder) => {
     const currentStatus = po.deliveryStatus || 'ordered';
     if (!canRevert(currentStatus)) return;
 
@@ -280,19 +282,17 @@ export default function Delivery() {
 
     let actualDeliveryDate = po.actualDeliveryDate;
 
-    // Remove actualDeliveryDate when reverting from delivered
     if (currentStatus === 'delivered') {
       actualDeliveryDate = null;
     }
 
-    const updatedPOs = pos.map(p =>
-      p.id === po.id
-        ? { ...p, deliveryStatus: prevStatus, actualDeliveryDate }
-        : p
-    );
+    const updated = { ...po, deliveryStatus: prevStatus, actualDeliveryDate };
+    const success = await upsertPurchaseOrder(updated);
+    if (!success) return;
 
-    persistPOs(updatedPOs);
-  }, [pos, persistPOs]);
+    setPosState(prev => prev.map(p => p.id === po.id ? updated : p));
+    triggerRefresh();
+  }, [triggerRefresh]);
 
   // ─── Notes Handlers ───
 
@@ -308,7 +308,7 @@ export default function Delivery() {
     });
   }, []);
 
-  const handleAddNote = useCallback((po: PurchaseOrder) => {
+  const handleAddNote = useCallback(async (po: PurchaseOrder) => {
     const text = newNoteText[po.id]?.trim();
     if (!text) return;
 
@@ -317,15 +317,18 @@ export default function Delivery() {
       text,
     };
 
-    const updatedPOs = pos.map(p =>
-      p.id === po.id
-        ? { ...p, deliveryNotes: [...(p.deliveryNotes || []), note] }
-        : p
-    );
+    const updated = {
+      ...po,
+      deliveryNotes: [...(po.deliveryNotes || []), note]
+    };
 
-    persistPOs(updatedPOs);
+    const success = await upsertPurchaseOrder(updated);
+    if (!success) return;
+
+    setPosState(prev => prev.map(p => p.id === po.id ? updated : p));
     setNewNoteText(prev => ({ ...prev, [po.id]: '' }));
-  }, [pos, newNoteText, persistPOs]);
+    triggerRefresh();
+  }, [newNoteText, triggerRefresh]);
 
   // ─── On-time Badge ───
 
@@ -369,6 +372,23 @@ export default function Delivery() {
   }, [deliveryPerf]);
 
   // ─── Empty State ───
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--text)' }}>Delivery Tracking</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Monitor shipment progress and delivery performance</p>
+        </div>
+        <div className="glass-card p-12 flex flex-col items-center justify-center gap-4 text-center">
+          <Package size={48} style={{ color: 'var(--text-muted)', opacity: 0.5 }} />
+          <div>
+            <h3 className="text-lg font-semibold" style={{ color: 'var(--text)' }}>Loading...</h3>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (poCount === 0) {
     return (

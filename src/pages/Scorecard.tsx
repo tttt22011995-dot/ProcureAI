@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   Star, TrendingUp, TrendingDown, Minus, Award, AlertTriangle, Clock,
   Truck, Package, DollarSign, Users, BarChart3, X, CheckCircle2,
@@ -11,11 +11,16 @@ import {
   getPurchaseOrders,
   getVendorRatings,
   getDeliveryPerformance,
+  fetchVendors,
+  fetchPurchaseOrders,
+  fetchVendorRatings,
+  fetchDeliveryPerformance,
   type Vendor,
   type PurchaseOrder,
   type VendorRating,
   type DeliveryPerformance,
 } from '../lib/data';
+import { useRefresh } from '../lib/RefreshContext';
 
 // ─── Types ───
 
@@ -120,6 +125,19 @@ function getStatusColor(status: string): string {
 // ─── Main Component ───
 
 export default function Scorecard() {
+  const { refreshKey } = useRefresh();
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    setIsLoading(true);
+    Promise.all([
+      fetchVendors(),
+      fetchPurchaseOrders(),
+      fetchVendorRatings(),
+      fetchDeliveryPerformance(),
+    ]).finally(() => setIsLoading(false));
+  }, [refreshKey]);
+
   const vendors = getVendors();
   const pos = getPurchaseOrders();
   const ratings = getVendorRatings();
@@ -392,6 +410,17 @@ export default function Scorecard() {
   }, []);
 
   // ─── Render ───
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center space-y-3">
+          <div className="animate-spin w-8 h-8 border-2 border-transparent border-t-[var(--blue)] rounded-full mx-auto" />
+          <p style={{ color: 'var(--text-muted)' }}>Loading performance data...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

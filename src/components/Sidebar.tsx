@@ -14,6 +14,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { computeAlerts, type Page } from '../lib/data';
+import { useRefresh } from '../lib/RefreshContext';
 
 interface SidebarProps {
   active: Page;
@@ -45,10 +46,15 @@ const alertColor: Record<string, string> = {
 
 export default function Sidebar({ active, onNavigate, isDark, onToggleTheme }: SidebarProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const { refreshKey } = useRefresh();
   const alerts = computeAlerts();
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown on outside click
+  // Refresh alerts when data changes
+  useEffect(() => {
+    // computeAlerts reads from cache, which is updated on refresh
+  }, [refreshKey]);
+
   useEffect(() => {
     if (!dropdownOpen) return;
     const handler = (e: MouseEvent) => {

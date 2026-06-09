@@ -1,17 +1,22 @@
-import { useState, useMemo, useRef, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   Search, Plus, Download, X, Pencil, Trash2, Check, Star, Mail, Phone, Clock, FileText,
 } from 'lucide-react';
 import {
+  fetchVendors,
+  fetchPurchaseOrders,
+  fetchVendorRatings,
   getVendors,
-  setVendors,
   getPurchaseOrders,
   getVendorRatings,
+  upsertVendor,
+  deleteVendor,
   nextVendorCode,
   type Vendor,
   type VendorRating,
   type PurchaseOrder,
 } from '../lib/data';
+import { useRefresh } from '../lib/RefreshContext';
 
 // ─── Constants ───
 
@@ -103,13 +108,15 @@ function emptyVendor(code: string): Vendor {
 // ─── Component ───
 
 export default function Vendors() {
-  const [vendors, setVendorsState] = useState<Vendor[]>(() => getVendors());
+  const [vendors, setVendorsState] = useState<Vendor[]>([]);
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [selected, setSelected] = useState<Vendor | null>(null);
   const [compareIds, setCompareIds] = useState<Set<string>>(new Set());
   const [showCompare, setShowCompare] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -120,9 +127,19 @@ export default function Vendors() {
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState<Vendor | null>(null);
 
-  const pos = useMemo(() => getPurchaseOrders(), []);
-  const ratings = useMemo(() => getVendorRatings(), []);
-  const detailRef = useRef<HTMLDivElement>(null);
+  const { refreshKey, triggerRefresh } = useRefresh();
+
+  useEffect(() => {
+    setIsLoading(true);
+    Promise.all([
+      fetchVendors(),
+      fetchPurchaseOrders(),
+      fetchVendorRatings(),
+    ]).finally(() => setIsLoading(false));
+  }, [refreshKey]);
+
+  const pos = getPurchaseOrders();
+  const ratings = getVendorRatings();
 
   // ─── Filtered vendors ───
 
@@ -137,13 +154,6 @@ export default function Vendors() {
       return matchCategory && matchStatus && matchSearch;
     });
   }, [vendors, search, filterCategory, filterStatus]);
-
-  // ─── Persist ───
-
-  const persist = useCallback((updated: Vendor[]) => {
-    setVendorsState(updated);
-    setVendors(updated);
-  }, []);
 
   // ─── Modal open/close ───
 
@@ -182,24 +192,42 @@ export default function Vendors() {
 
   // ─── Save ───
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     if (!validate()) return;
-    if (editingVendor) {
-      persist(vendors.map(v => v.id === editingVendor.id ? { ...form } : v));
-    } else {
-      persist([...vendors, { ...form }]);
+    setIsSaving(true);
+    try {
+      const success = await upsertVendor(form);
+      if (success) {
+        if (editingVendor) {
+          setVendorsState(prev => prev.map(v => v.id === editingVendor.id ? { ...form } : v));
+        } else {
+          setVendorsState(prev => [...prev, { ...form }]);
+        }
+        triggerRefresh();
+      }
+      closeModal();
+    } finally {
+      setIsSaving(false);
     }
-    closeModal();
-  }, [form, editingVendor, vendors, persist, closeModal]);
+  }, [form, editingVendor, closeModal, triggerRefresh]);
 
   // ─── Delete ───
 
-  const handleDelete = useCallback((v: Vendor) => {
-    persist(vendors.filter(x => x.id !== v.id));
-    setDeleteTarget(null);
-    if (selected?.id === v.id) setSelected(null);
-    setCompareIds(prev => { const n = new Set(prev); n.delete(v.id); return n; });
-  }, [vendors, persist, selected]);
+  const handleDelete = useCallback(async (v: Vendor) => {
+    setIsSaving(true);
+    try {
+      const success = await deleteVendor(v.id);
+      if (success) {
+        setVendorsState(prev => prev.filter(x => x.id !== v.id));
+        setDeleteTarget(null);
+        if (selected?.id === v.id) setSelected(null);
+        setCompareIds(prev => { const n = new Set(prev); n.delete(v.id); return n; });
+        triggerRefresh();
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  }, [selected, triggerRefresh]);
 
   // ─── Compare toggle ───
 
@@ -248,7 +276,21 @@ export default function Vendors() {
     return vendors.filter(v => compareIds.has(v.id));
   }, [vendors, compareIds]);
 
+  // ─── Initial data ───
+
+  useEffect(() => {
+    setVendorsState(getVendors());
+  }, [isLoading]);
+
   // ─── Render ───
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-sm" style={{ color: 'var(--text-muted)' }}>Loading vendors...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex gap-6">
@@ -293,13 +335,13 @@ export default function Vendors() {
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <h1 className="text-2xl font-bold" style={{ color: 'var(--text)' }}>
-            🏢 Vendor Directory
+            Vendor Directory
           </h1>
           <div className="flex items-center gap-2">
             <button className="glass-button flex items-center gap-2 text-xs" onClick={exportCSV}>
               <Download size={14} /> Export CSV
             </button>
-            <button className="glass-button glass-button-primary flex items-center gap-2 text-xs" onClick={openAddModal}>
+            <button className="glass-button glass-button-primary flex items-center gap-2 text-xs" onClick={openAddModal} disabled={isSaving}>
               <Plus size={14} /> Add Vendor
             </button>
           </div>
@@ -361,7 +403,7 @@ export default function Vendors() {
               <div
                 key={v.id}
                 className="glass-card p-5 cursor-pointer relative group"
-                onClick={() => setSelected(v)}
+                onClick={() => setSelected(s => s?.id === v.id ? null : v)}
               >
                 {/* Compare checkbox */}
                 <div
@@ -477,7 +519,7 @@ export default function Vendors() {
         )}
       </div>
 
-      {/* ─── Detail Slide-in Panel ─── */}
+      {/* Detail Slide-in Panel */}
       <div
         className="fixed top-0 right-0 bottom-0 w-[360px] glass-panel z-30 overflow-y-auto transition-transform"
         style={{
@@ -486,7 +528,6 @@ export default function Vendors() {
           transitionTimingFunction: 'cubic-bezier(.22,1,.36,1)',
           transitionDuration: '280ms',
         }}
-        ref={detailRef}
       >
         {selected && (
           <DetailPanel
@@ -502,7 +543,7 @@ export default function Vendors() {
         )}
       </div>
 
-      {/* ─── Backdrop for detail panel ─── */}
+      {/* Backdrop for detail panel */}
       {selected && (
         <div
           className="fixed inset-0 z-20"
@@ -511,7 +552,7 @@ export default function Vendors() {
         />
       )}
 
-      {/* ─── Add/Edit Modal ─── */}
+      {/* Add/Edit Modal */}
       {modalOpen && (
         <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>
           <div className="glass-panel p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto" style={{ borderRadius: 24 }}>
@@ -654,15 +695,15 @@ export default function Vendors() {
             {/* Actions */}
             <div className="flex items-center justify-end gap-3 mt-6">
               <button className="glass-button" onClick={closeModal}>Cancel</button>
-              <button className="glass-button glass-button-primary" onClick={handleSave}>
-                {editingVendor ? 'Save Changes' : 'Add Vendor'}
+              <button className="glass-button glass-button-primary" onClick={handleSave} disabled={isSaving}>
+                {isSaving ? 'Saving...' : editingVendor ? 'Save Changes' : 'Add Vendor'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ─── Delete Confirmation Modal ─── */}
+      {/* Delete Confirmation Modal */}
       {deleteTarget && (
         <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>
           <div className="glass-panel p-6 w-full max-w-sm" style={{ borderRadius: 24 }}>
@@ -687,15 +728,16 @@ export default function Vendors() {
                 className="glass-button"
                 style={{ background: 'var(--red)', color: '#fff', borderColor: 'transparent' }}
                 onClick={() => handleDelete(deleteTarget)}
+                disabled={isSaving}
               >
-                Delete
+                {isSaving ? 'Deleting...' : 'Delete'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ─── Compare Modal ─── */}
+      {/* Compare Modal */}
       {showCompare && compareVendors.length === 2 && (
         <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>
           <div className="glass-panel p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto" style={{ borderRadius: 24 }}>
@@ -720,7 +762,7 @@ export default function Vendors() {
   );
 }
 
-// ─── Detail Panel ───
+// Detail Panel
 
 function DetailPanel({ vendor, rating, openPOs, totalPOs, lastOrder, onClose, onEdit, onDelete }: {
   vendor: Vendor;
@@ -815,7 +857,7 @@ function DetailPanel({ vendor, rating, openPOs, totalPOs, lastOrder, onClose, on
   );
 }
 
-// ─── Compare Table ───
+// Compare Table
 
 function CompareTable({ vendors, ratings, pos }: { vendors: Vendor[]; ratings: VendorRating[]; pos: PurchaseOrder[] }) {
   const [v1, v2] = vendors;

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Chart as ChartJS,
   type ChartData,
@@ -18,6 +18,9 @@ import {
 import '../lib/chartSetup';
 import { useAnimatedCounter } from '../lib/useAnimatedCounter';
 import {
+  fetchVendors,
+  fetchPurchaseOrders,
+  fetchVendorRatings,
   getVendors,
   getPurchaseOrders,
   getVendorRatings,
@@ -27,6 +30,7 @@ import {
 } from '../lib/data';
 import type { PurchaseOrder } from '../lib/data';
 import { PageErrorBoundary } from '../components/ErrorBoundary';
+import { useRefresh } from '../lib/RefreshContext';
 
 const chartFont = { family: 'Inter, system-ui, sans-serif' };
 
@@ -175,11 +179,23 @@ function POCard({ po }: { po: PurchaseOrder }) {
 // ─── Dashboard ───
 
 export default function Dashboard() {
+  const [range, setRange] = useState<Range>('6M');
+  const [chartError, setChartError] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const { refreshKey } = useRefresh();
+
+  useEffect(() => {
+    setIsLoading(true);
+    Promise.all([
+      fetchVendors(),
+      fetchPurchaseOrders(),
+      fetchVendorRatings(),
+    ]).finally(() => setIsLoading(false));
+  }, [refreshKey]);
+
   const vendors = getVendors();
   const pos = getPurchaseOrders();
   const ratings = getVendorRatings();
-  const [range, setRange] = useState<Range>('6M');
-  const [chartError, setChartError] = useState(false);
 
   const totalVendors = vendors.length;
   const openPOs = pos.filter(p => ['draft', 'pending', 'approved'].includes(p.status)).length;
@@ -290,6 +306,14 @@ export default function Dashboard() {
     () => [...pos].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 10),
     [pos]
   );
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-sm" style={{ color: 'var(--text-muted)' }}>Loading...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

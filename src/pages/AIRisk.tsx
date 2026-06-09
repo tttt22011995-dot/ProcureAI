@@ -8,6 +8,10 @@ import {
 import { Doughnut } from 'react-chartjs-2';
 import '../lib/chartSetup';
 import {
+  fetchVendors,
+  fetchPurchaseOrders,
+  fetchVendorRatings,
+  fetchDeliveryPerformance,
   getVendors,
   getPurchaseOrders,
   getVendorRatings,
@@ -22,6 +26,7 @@ import {
   type SupplierRisk,
   type RiskCategory,
 } from '../lib/supplierRisk';
+import { useRefresh } from '../lib/RefreshContext';
 
 // ─── Types ───
 
@@ -328,6 +333,19 @@ RULES:
 
 export default function AIRisk() {
   // ─── State ───
+  const [isLoadingData, setIsLoadingData] = useState(true);
+  const { refreshKey } = useRefresh();
+
+  useEffect(() => {
+    setIsLoadingData(true);
+    Promise.all([
+      fetchVendors(),
+      fetchPurchaseOrders(),
+      fetchVendorRatings(),
+      fetchDeliveryPerformance(),
+    ]).finally(() => setIsLoadingData(false));
+  }, [refreshKey]);
+
   const vendors = getVendors();
   const pos = getPurchaseOrders();
   const ratings = getVendorRatings();
@@ -570,6 +588,15 @@ export default function AIRisk() {
   };
 
   // ─── Render ───
+
+  if (isLoadingData) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-sm" style={{ color: 'var(--text-muted)' }}>Loading data...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}

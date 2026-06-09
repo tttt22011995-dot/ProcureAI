@@ -6,15 +6,17 @@ import PurchaseOrders from './pages/PurchaseOrders';
 import Delivery from './pages/Delivery';
 import Scorecard from './pages/Scorecard';
 import AIRisk from './pages/AIRisk';
-import { seedData, type Page } from './lib/data';
+import { loadInitialData, type Page } from './lib/data';
 import { PageErrorBoundary } from './components/ErrorBoundary';
+import { RefreshProvider } from './lib/RefreshContext';
 
-function App() {
+function AppContent() {
   const [page, setPage] = useState<Page>('dashboard');
   const [isDark, setIsDark] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    seedData();
+    loadInitialData().finally(() => setIsLoading(false));
   }, []);
 
   useEffect(() => {
@@ -25,6 +27,14 @@ function App() {
   }, [isDark]);
 
   const toggleTheme = () => setIsDark(d => !d);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}>
+        <div className="text-sm" style={{ color: 'var(--text-muted)' }}>Loading data...</div>
+      </div>
+    );
+  }
 
   const renderPage = () => {
     switch (page) {
@@ -55,6 +65,14 @@ function App() {
         </div>
       </main>
     </div>
+  );
+}
+
+function App() {
+  return (
+    <RefreshProvider>
+      <AppContent />
+    </RefreshProvider>
   );
 }
 

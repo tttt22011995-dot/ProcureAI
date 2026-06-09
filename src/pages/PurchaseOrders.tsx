@@ -4,16 +4,20 @@ import {
   ChevronDown, ChevronUp, ArrowUp, ArrowDown, AlertTriangle,
 } from 'lucide-react';
 import {
+  fetchVendors,
+  fetchPurchaseOrders,
   getPurchaseOrders,
-  setPurchaseOrders,
   getVendors,
   nextPONumber,
   CATALOG_ITEMS,
+  upsertPurchaseOrder,
+  deletePurchaseOrderById,
   type PurchaseOrder,
   type LineItem,
   type Vendor,
 } from '../lib/data';
 import { poStatusColorMap } from '../lib/data';
+import { useRefresh } from '../lib/RefreshContext';
 
 // ─── Constants ───
 
@@ -63,8 +67,9 @@ function calculateGrandTotal(subtotal: number, tax: number): number {
 // ─── Main Component ───
 
 export default function PurchaseOrders() {
-  const [pos, setPosState] = useState<PurchaseOrder[]>(() => getPurchaseOrders());
-  const vendors = useMemo(() => getVendors(), []);
+  const [pos, setPosState] = useState<PurchaseOrder[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const { refreshKey, triggerRefresh } = useRefresh();
 
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -83,13 +88,21 @@ export default function PurchaseOrders() {
   const [items, setItems] = useState<LineItem[]>([emptyLineItem()]);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const flashRef = useRef<HTMLDivElement | null>(null);
+  const flashRef = useRef<HTMLTableRowElement | null>(null);
 
-  // Persist
-  const persist = useCallback((updated: PurchaseOrder[]) => {
-    setPosState(updated);
-    setPurchaseOrders(updated);
-  }, []);
+  useEffect(() => {
+    setIsLoading(true);
+    Promise.all([
+      fetchVendors(),
+      fetchPurchaseOrders(),
+    ]).finally(() => setIsLoading(false));
+  }, [refreshKey]);
+
+  useEffect(() => {
+    setPosState(getPurchaseOrders());
+  }, [isLoading]);
+
+  const vendors = useMemo(() => getVendors(), [isLoading]);
 
   // ─── Filtering & Sorting ───
 
@@ -239,7 +252,7 @@ export default function PurchaseOrders() {
 
   // ─── Save PO ───
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     if (!validateForm()) return;
 
     const vendor = vendors.find(v => v.id === selectedVendorId);
@@ -250,23 +263,20 @@ export default function PurchaseOrders() {
     const grandTotal = calculateGrandTotal(subtotal, tax);
 
     if (editingPO) {
-      // Update existing
-      const updated = pos.map(p =>
-        p.id === editingPO.id
-          ? {
-              ...p,
-              vendorId: selectedVendorId,
-              vendorName: vendor.name,
-              items: items.filter(i => i.name.trim()),
-              total: grandTotal,
-              deliveryDate,
-            }
-          : p
-      );
-      persist(updated);
-      closeModal();
+      const po: PurchaseOrder = {
+        ...editingPO,
+        vendorId: selectedVendorId,
+        vendorName: vendor.name,
+        items: items.filter(i => i.name.trim()),
+        total: grandTotal,
+        deliveryDate,
+      };
+      const success = await upsertPurchaseOrder(po);
+      if (success) {
+        setPosState(prev => prev.map(p => p.id === editingPO.id ? po : p));
+        triggerRefresh();
+      }
     } else {
-      // Create new
       const newPO: PurchaseOrder = {
         id: nextPONumber(),
         vendorId: selectedVendorId,
@@ -278,37 +288,47 @@ export default function PurchaseOrders() {
         deliveryDate,
         priority: 'medium',
       };
-      persist([newPO, ...pos]);
-      closeModal();
+      const success = await upsertPurchaseOrder(newPO);
+      if (success) {
+        setPosState(prev => [newPO, ...prev]);
+        triggerRefresh();
+      }
     }
-  }, [validateForm, vendors, items, editingPO, selectedVendorId, deliveryDate, pos, persist, closeModal]);
+    closeModal();
+  }, [validateForm, vendors, items, editingPO, selectedVendorId, deliveryDate, triggerRefresh, closeModal]);
 
   // ─── Duplicate PO ───
 
-  const handleDuplicate = useCallback((po: PurchaseOrder) => {
+  const handleDuplicate = useCallback(async (po: PurchaseOrder) => {
     const newPO: PurchaseOrder = {
       ...po,
       id: nextPONumber(),
-      status: 'ordered',
+      status: 'draft',
       createdAt: new Date().toISOString().split('T')[0],
       items: po.items.map(i => ({ ...i, id: generateLineItemId() })),
     };
-    persist([newPO, ...pos]);
-
-    // Flash effect
-    setFlashId(newPO.id);
-    setTimeout(() => {
-      flashRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 50);
-    setTimeout(() => setFlashId(null), 2000);
-  }, [pos, persist]);
+    const success = await upsertPurchaseOrder(newPO);
+    if (success) {
+      setPosState(prev => [newPO, ...prev]);
+      triggerRefresh();
+      setFlashId(newPO.id);
+      setTimeout(() => {
+        flashRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 50);
+      setTimeout(() => setFlashId(null), 2000);
+    }
+  }, [triggerRefresh]);
 
   // ─── Delete PO ───
 
-  const handleDelete = useCallback((poId: string) => {
+  const handleDelete = useCallback(async (poId: string) => {
     if (!window.confirm('Are you sure you want to delete this purchase order?')) return;
-    persist(pos.filter(p => p.id !== poId));
-  }, [pos, persist]);
+    const success = await deletePurchaseOrderById(poId);
+    if (success) {
+      setPosState(prev => prev.filter(p => p.id !== poId));
+      triggerRefresh();
+    }
+  }, [triggerRefresh]);
 
   // ─── Line Items ───
 
@@ -361,6 +381,14 @@ export default function PurchaseOrders() {
   }, [flashId]);
 
   // ─── Render ───
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-sm" style={{ color: 'var(--text-muted)' }}>Loading purchase orders...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
