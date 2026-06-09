@@ -8,6 +8,7 @@ import Delivery from './pages/Delivery';
 import Scorecard from './pages/Scorecard';
 import AIRisk from './pages/AIRisk';
 import CatalogItems from './pages/CatalogItems';
+import GuidedTour from './components/GuidedTour';
 import { seedData, type Page } from './lib/data';
 import { PageErrorBoundary } from './components/ErrorBoundary';
 import { RefreshProvider } from './lib/RefreshContext';
@@ -18,6 +19,7 @@ function AppContent() {
   const [isDark, setIsDark] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [tourRunning, setTourRunning] = useState(false);
 
   useEffect(() => {
     seedData().finally(() => setIsLoading(false));
@@ -84,12 +86,19 @@ function AppContent() {
         onToggleTheme={toggleTheme}
         isMobileOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        onOpenTour={() => setTourRunning(true)}
       />
       <main className="md:ml-[220px] ml-0 p-4 md:p-6 lg:p-8 min-h-screen">
         <div className="max-w-7xl mx-auto">
           {renderPage()}
         </div>
       </main>
+      <GuidedTour
+        isRunning={tourRunning}
+        currentPage={page}
+        onNavigate={setPage}
+        onClose={() => setTourRunning(false)}
+      />
     </div>
   );
 }
