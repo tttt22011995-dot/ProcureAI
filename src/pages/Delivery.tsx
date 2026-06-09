@@ -1,10 +1,8 @@
 import { useState, useMemo } from 'react';
 import { Truck, Clock, CheckCircle2, AlertTriangle, Search, Calendar } from 'lucide-react';
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';
 import { Bar } from 'react-chartjs-2';
+import '../lib/chartSetup';
 import { getDeliveryPerformance, type DeliveryPerformance } from '../lib/data';
-
-ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 const statusIcon: Record<string, React.ElementType> = {
   'on-time': CheckCircle2,

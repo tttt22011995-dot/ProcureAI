@@ -3,11 +3,9 @@ import {
   ShieldAlert, AlertTriangle, AlertCircle, Info,
   TrendingDown, Clock, DollarSign,
 } from 'lucide-react';
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend, Filler } from 'chart.js';
 import { Bar, Doughnut } from 'react-chartjs-2';
+import '../lib/chartSetup';
 import { getVendors, getVendorRatings } from '../lib/data';
-
-ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend, Filler);
 
 interface RiskAlert {
   id: string;

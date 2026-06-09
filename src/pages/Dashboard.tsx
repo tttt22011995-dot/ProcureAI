@@ -1,16 +1,6 @@
 import { useState, useMemo } from 'react';
 import {
   Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  ArcElement,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler,
   type ChartData,
   type ChartOptions,
 } from 'chart.js';
@@ -25,6 +15,7 @@ import {
   Minus,
   Inbox,
 } from 'lucide-react';
+import '../lib/chartSetup';
 import { useAnimatedCounter } from '../lib/useAnimatedCounter';
 import {
   getVendors,
@@ -35,11 +26,7 @@ import {
   poStatusColorMap,
 } from '../lib/data';
 import type { PurchaseOrder } from '../lib/data';
-
-ChartJS.register(
-  CategoryScale, LinearScale, BarElement, ArcElement,
-  PointElement, LineElement, Title, Tooltip, Legend, Filler
-);
+import { PageErrorBoundary } from '../components/ErrorBoundary';
 
 const chartFont = { family: 'Inter, system-ui, sans-serif' };
 
@@ -344,12 +331,13 @@ export default function Dashboard() {
           {chartError ? (
             <FallbackTable buckets={buckets} />
           ) : (
-            <Chart
-              type="bar"
-              data={chartData}
-              options={chartOptions}
-              onError={() => setChartError(true)}
-            />
+            <PageErrorBoundary>
+              <Chart
+                type="bar"
+                data={chartData}
+                options={chartOptions}
+              />
+            </PageErrorBoundary>
           )}
         </div>
       </div>

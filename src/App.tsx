@@ -7,6 +7,7 @@ import Delivery from './pages/Delivery';
 import Scorecard from './pages/Scorecard';
 import AiRisk from './pages/AiRisk';
 import { seedData, type Page } from './lib/data';
+import { PageErrorBoundary } from './components/ErrorBoundary';
 
 function App() {
   const [page, setPage] = useState<Page>('dashboard');
@@ -27,12 +28,12 @@ function App() {
 
   const renderPage = () => {
     switch (page) {
-      case 'dashboard': return <Dashboard />;
-      case 'vendors': return <Vendors />;
-      case 'purchase-orders': return <PurchaseOrders />;
-      case 'delivery': return <Delivery />;
-      case 'scorecard': return <Scorecard />;
-      case 'ai-risk': return <AiRisk />;
+      case 'dashboard': return <PageErrorBoundary><Dashboard /></PageErrorBoundary>;
+      case 'vendors': return <PageErrorBoundary><Vendors /></PageErrorBoundary>;
+      case 'purchase-orders': return <PageErrorBoundary><PurchaseOrders /></PageErrorBoundary>;
+      case 'delivery': return <PageErrorBoundary><Delivery /></PageErrorBoundary>;
+      case 'scorecard': return <PageErrorBoundary><Scorecard /></PageErrorBoundary>;
+      case 'ai-risk': return <PageErrorBoundary><AiRisk /></PageErrorBoundary>;
     }
   };
 
