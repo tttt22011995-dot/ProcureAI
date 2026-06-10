@@ -569,7 +569,7 @@ export default function PurchaseOrders() {
       {/* ─── Create/Edit Modal ─── */}
       {modalOpen && (
         <Modal onClose={closeModal}>
-          <div className="glass-panel p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto" style={{ borderRadius: 24 }}>
+          <div className="glass-panel p-6 w-full max-w-5xl max-h-[90vh] overflow-y-auto" style={{ borderRadius: 24 }}>
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>{editingPO ? `Editing ${editingPO.id}` : 'Create New Purchase Order'}</h2>
               <button onClick={closeModal} style={{ color: 'var(--text-muted)' }}><X size={18} /></button>
@@ -617,6 +617,14 @@ export default function PurchaseOrders() {
                     <button className="glass-button text-xs py-1 px-3 flex items-center gap-1" onClick={addItem}><Plus size={12} /> Add Item</button>
                   </div>
                   {errors.items && <div className="text-xs mb-2" style={{ color: 'var(--red)' }}>{errors.items}</div>}
+                  {/* Column headers */}
+                  <div className="grid grid-cols-12 gap-3 px-3 pb-1">
+                    <div className="col-span-5 text-[10px] font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>Item</div>
+                    <div className="col-span-2 text-[10px] font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>Qty</div>
+                    <div className="col-span-2 text-[10px] font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>Unit Price</div>
+                    <div className="col-span-2 text-[10px] font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>Total</div>
+                    <div className="col-span-1" />
+                  </div>
                   <div className="space-y-2">
                     {items.map((item, idx) => (
                       <LineItemRow
@@ -653,7 +661,7 @@ export default function PurchaseOrders() {
       {/* ─── View/Print Modal ─── */}
       {viewingPO && (
         <Modal onClose={() => setViewingPO(null)}>
-          <div className="glass-panel p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto print-area" style={{ borderRadius: 24 }}>
+          <div className="glass-panel p-6 w-full max-w-5xl max-h-[90vh] overflow-y-auto print-area" style={{ borderRadius: 24 }}>
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>Purchase Order: {viewingPO.id}</h2>
               <div className="flex items-center gap-2">
@@ -854,13 +862,15 @@ function LineItemRow({
           )}
         </div>
         <div className="col-span-2">
-          <input ref={qtyInputRef} type="number" min={0} className="glass-input w-full" style={error ? { borderColor: 'var(--red)' } : undefined} placeholder="Qty" value={item.quantity || ''} onChange={e => updateItem(idx, 'quantity', e.target.value)} onKeyDown={e => handleKeyDown(e, 'qty')} />
+          <input ref={qtyInputRef} type="number" min={0} className="glass-input w-full" style={error ? { borderColor: 'var(--red)' } : undefined} placeholder="0" value={item.quantity || ''} onChange={e => updateItem(idx, 'quantity', e.target.value)} onKeyDown={e => handleKeyDown(e, 'qty')} />
           {error && <div className="text-xs mt-0.5" style={{ color: 'var(--red)' }}>{error}</div>}
         </div>
         <div className="col-span-2">
-          <input ref={priceInputRef} type="number" min={0} step="0.01" className="glass-input w-full" placeholder="Price" value={item.unitPrice || ''} onChange={e => updateItem(idx, 'unitPrice', e.target.value)} onKeyDown={e => handleKeyDown(e, 'price')} />
+          <input ref={priceInputRef} type="number" min={0} step="0.01" className="glass-input w-full" placeholder="0.00" value={item.unitPrice || ''} onChange={e => updateItem(idx, 'unitPrice', e.target.value)} onKeyDown={e => handleKeyDown(e, 'price')} />
         </div>
-        <div className="col-span-2 text-right"><span className="font-semibold" style={{ color: 'var(--text)' }}>${item.total.toLocaleString()}</span></div>
+        <div className="col-span-2">
+          <div className="glass-input w-full font-semibold" style={{ color: 'var(--text)', background: 'rgba(0,0,0,0.05)', cursor: 'default', userSelect: 'none', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${item.total.toLocaleString()}</div>
+        </div>
         <div className="col-span-1 flex justify-center">
           <button className="p-1.5 rounded-lg transition-colors hover:bg-[rgba(251,113,133,0.1)]" style={{ color: 'var(--red)' }} onClick={() => removeItem(idx)}><X size={14} /></button>
         </div>
@@ -874,7 +884,7 @@ function LineItemRow({
 function Modal({ children, onClose, title }: { children: React.ReactNode; onClose: () => void; title?: string }) {
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="glass-panel p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto" style={{ borderRadius: 24 }}>
+      <div className="glass-panel p-6 w-full max-w-5xl max-h-[90vh] overflow-y-auto" style={{ borderRadius: 24 }}>
         {title && <div className="flex items-center justify-between mb-4"><h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>{title}</h2><button onClick={onClose} style={{ color: 'var(--text-muted)' }}><X size={18} /></button></div>}
         {children}
       </div>
